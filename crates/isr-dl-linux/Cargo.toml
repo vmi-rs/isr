@@ -1,0 +1,25 @@
+[package]
+name = "isr-dl-linux"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "Linux downloader for ISR"
+keywords = [
+    "isr",
+]
+
+[dependencies]
+debpkg = { workspace = true }
+flate2 = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }

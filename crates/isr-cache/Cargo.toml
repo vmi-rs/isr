@@ -1,0 +1,42 @@
+[package]
+name = "isr-cache"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "Cache for ISR"
+keywords = [
+    "isr",
+]
+
+[dependencies]
+bincode = { workspace = true, optional = true }
+memmap2 = { workspace = true }
+rmp-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+isr-core = { path = "../isr-core", version = "0.0.1-rc.1" }
+isr-pdb = { path = "../isr-pdb", version = "0.0.1-rc.1", optional = true }
+isr-dwarf = { path = "../isr-dwarf", version = "0.0.1-rc.1", optional = true }
+isr-dl-pdb = { path = "../isr-dl-pdb", version = "0.0.1-rc.1", optional = true }
+isr-dl-linux = { path = "../isr-dl-linux", version = "0.0.1-rc.1", optional = true }
+
+[dev-dependencies]
+# isr = { path = "../..", version = "0.0.1-rc.1" }
+
+[features]
+default = ["pdb", "linux", "codec-bincode", "codec-json", "codec-msgpack"]
+
+pdb = ["isr-dl-pdb", "isr-pdb"]
+linux = ["isr-dl-linux", "isr-dwarf"]
+codec-bincode = ["bincode"]
+codec-json = ["serde_json"]
+codec-msgpack = ["rmp-serde"]

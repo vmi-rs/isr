@@ -1,0 +1,23 @@
+[package]
+name = "isr-pdb"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "PDB parser for ISR"
+keywords = [
+    "isr",
+]
+
+[dependencies]
+indexmap = { workspace = true }
+pdb = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+isr-core = { path = "../isr-core", version = "0.0.1-rc.1" }

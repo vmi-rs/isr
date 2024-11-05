@@ -1,0 +1,113 @@
+[workspace]
+members = [
+    "crates/*",
+]
+resolver = "2"
+
+[workspace.package]
+authors = ["Petr Benes <w.benny@outlook.com>"]
+edition = "2021"
+license = "MIT"
+publish = true
+rust-version = "1.81.0"
+
+homepage = "https://github.com/vmi-rs/isr"
+repository = "https://github.com/vmi-rs/isr"
+
+[workspace.dependencies]
+bincode = "1"
+debpkg = "0.6"
+flate2 = "1.0"
+gimli = "0.31"
+indexmap = "2"
+memmap2 = "0.9"
+object = "0.36"
+pdb = "0.8"
+regex = "1"
+reqwest = "0.12"
+rmp-serde = "1.1"
+serde = "1"
+serde_json = "1"
+smallvec = "1"
+thiserror = "1.0"
+tracing = "0.1"
+url = "2.5"
+
+[profile.release]
+debug = 1
+
+################################################################################
+# Root package
+################################################################################
+
+[package]
+name = "isr"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "Intermediate Symbol Representation"
+
+keywords = [
+    "isr",
+    "pdb",
+    "dwarf",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
+rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
+
+[dependencies]
+isr-core = { path = "./crates/isr-core", version = "0.0.1-rc.1" }
+isr-macros = { path = "./crates/isr-macros", version = "0.0.1-rc.1" }
+
+isr-cache = { path = "./crates/isr-cache", version = "0.0.1-rc.1", optional = true }
+
+isr-dwarf = { path = "./crates/isr-dwarf", version = "0.0.1-rc.1", optional = true }
+isr-pdb = { path = "./crates/isr-pdb", version = "0.0.1-rc.1", optional = true }
+
+isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.0.1-rc.1", optional = true }
+isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.0.1-rc.1", optional = true }
+
+[features]
+default = [
+    "cache",
+    "dwarf",
+    "pdb",
+    "dl-linux",
+    "dl-pdb"
+]
+
+cache = [
+    "isr-cache",
+    "isr-cache/codec-bincode",
+    "isr-cache/codec-json",
+    "isr-cache/codec-msgpack"
+]
+
+dwarf = [
+    "isr-dwarf",
+    "isr-cache?/linux"
+]
+
+pdb = [
+    "isr-pdb",
+    "isr-cache?/pdb"
+]
+
+dl-linux = [
+    "isr-dl-linux",
+    "isr-cache?/linux"
+]
+
+dl-pdb = [
+    "isr-dl-pdb",
+    "isr-cache?/pdb"
+]

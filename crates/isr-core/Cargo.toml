@@ -1,0 +1,20 @@
+[package]
+name = "isr-core"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "Core ISR library"
+keywords = [
+    "isr",
+]
+
+[dependencies]
+indexmap = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+smallvec = { workspace = true , features = ["serde"] }

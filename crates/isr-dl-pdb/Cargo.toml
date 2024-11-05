@@ -1,0 +1,21 @@
+[package]
+name = "isr-dl-pdb"
+version = "0.0.1-rc.1"
+license = "MIT"
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "PDB downloader for ISR"
+keywords = [
+    "isr",
+]
+
+[dependencies]
+object = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
