@@ -63,7 +63,5 @@ Consult the [`vmi`] crate for more information on how to download debug
 symbols for introspected VMs.
 
 
-License: MIT
-
 [`isr`]: https://docs.rs/isr/latest/isr/index.html
 [`vmi`]: https://docs.rs/vmi/latest/vmi/index.html

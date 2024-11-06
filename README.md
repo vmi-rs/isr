@@ -98,5 +98,3 @@ frameworks. ISR is specifically designed for the [`vmi`] crate.
 
 This project is licensed under the MIT license.
 
-
-License: MIT
