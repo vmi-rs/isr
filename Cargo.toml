@@ -42,7 +42,7 @@ debug = 1
 
 [package]
 name = "isr"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 authors = { workspace = true }
 edition = { workspace = true }
@@ -65,16 +65,16 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
 
 [dependencies]
-isr-core = { path = "./crates/isr-core", version = "0.1.0" }
-isr-macros = { path = "./crates/isr-macros", version = "0.1.0" }
+isr-core = { path = "./crates/isr-core", version = "0.1.1" }
+isr-macros = { path = "./crates/isr-macros", version = "0.1.1" }
 
-isr-cache = { path = "./crates/isr-cache", version = "0.1.0", optional = true }
+isr-cache = { path = "./crates/isr-cache", version = "0.1.1", optional = true }
 
-isr-dwarf = { path = "./crates/isr-dwarf", version = "0.1.0", optional = true }
-isr-pdb = { path = "./crates/isr-pdb", version = "0.1.0", optional = true }
+isr-dwarf = { path = "./crates/isr-dwarf", version = "0.1.1", optional = true }
+isr-pdb = { path = "./crates/isr-pdb", version = "0.1.1", optional = true }
 
-isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.1.0", optional = true }
-isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.1.0", optional = true }
+isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.1.1", optional = true }
+isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.1.1", optional = true }
 
 [features]
 default = [

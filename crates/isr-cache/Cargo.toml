@@ -1,6 +1,6 @@
 [package]
 name = "isr-cache"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 authors = { workspace = true }
 edition = { workspace = true }
@@ -23,14 +23,14 @@ serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-isr-core = { path = "../isr-core", version = "0.1.0" }
-isr-pdb = { path = "../isr-pdb", version = "0.1.0", optional = true }
-isr-dwarf = { path = "../isr-dwarf", version = "0.1.0", optional = true }
-isr-dl-pdb = { path = "../isr-dl-pdb", version = "0.1.0", optional = true }
-isr-dl-linux = { path = "../isr-dl-linux", version = "0.1.0", optional = true }
+isr-core = { path = "../isr-core", version = "0.1.1" }
+isr-pdb = { path = "../isr-pdb", version = "0.1.1", optional = true }
+isr-dwarf = { path = "../isr-dwarf", version = "0.1.1", optional = true }
+isr-dl-pdb = { path = "../isr-dl-pdb", version = "0.1.1", optional = true }
+isr-dl-linux = { path = "../isr-dl-linux", version = "0.1.1", optional = true }
 
 [dev-dependencies]
-# isr = { path = "../..", version = "0.1.0" }
+# isr = { path = "../..", version = "0.1.1" }
 
 [features]
 default = ["pdb", "linux", "codec-bincode", "codec-json", "codec-msgpack"]

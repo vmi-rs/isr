@@ -1,6 +1,6 @@
 [package]
 name = "isr-pdb"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 authors = { workspace = true }
 edition = { workspace = true }
@@ -20,4 +20,4 @@ pdb = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-isr-core = { path = "../isr-core", version = "0.1.0" }
+isr-core = { path = "../isr-core", version = "0.1.1" }
