@@ -46,9 +46,10 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 
 /// Defines a set of symbols.
 ///
-/// This macro simplifies the process of defining symbols for later use with the `isr` crate,
-/// enabling type-safe access to symbol addresses and offsets. It generates a struct
-/// with fields corresponding to the defined symbols.
+/// This macro simplifies the process of defining symbols for later use
+/// with the `isr` crate, enabling type-safe access to symbol addresses
+/// and offsets. It generates a struct with fields corresponding to
+/// the defined symbols.
 ///
 /// # Usage
 ///
@@ -79,7 +80,13 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Use the profile of a Windows 10.0.18362.356 kernel.
-/// # let profile = JsonCodec::decode(include_bytes!("../../../tests/assets/cache/windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"))?;
+/// # let profile = JsonCodec::decode(include_bytes!(
+/// #   concat!(
+/// #     "../../../",
+/// #     "tests/data/cache/",
+/// #     "windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"
+/// #   )
+/// # ))?;
 /// let symbols = Symbols::new(&profile)?;
 /// assert_eq!(symbols.PsActiveProcessHead, 0x437BC0);
 /// assert_eq!(symbols.PsInitialSystemProcess, Some(0x5733A0));
@@ -90,16 +97,17 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 ///
 /// # Attributes
 ///
-/// - `#[isr(alias = "alternative_name")]`: Specifies an alternative name for the
-///   symbol. This is useful when the symbol has different names across different
-///   OS builds or versions.
+/// - `#[isr(alias = <alias>)]`: Specifies an alternative name for the symbol.
+///   This is useful when the symbol has different names across different OS
+///   builds or versions.
 ///
-/// - `#[isr(alias = ["name1", "name2", ...])]`: Specifies multiple alternative
-///   names for the symbol.
+///   `<alias>` can be a single literal or an array of literals, e.g.:
+///   - `#[isr(alias = "alternative_name")]`
+///   - `#[isr(alias = ["name1", "name2", ...])]`
 ///
-/// The generated struct provides a `new` method that takes a reference to an
-/// [`Profile`] and returns a `Result` containing the populated struct or an
-/// error if any symbols are not found.
+/// The generated struct provides a `new` method that takes a reference to
+/// a [`Profile`] and returns a `Result` containing the populated struct or
+/// an error if any symbols are not found.
 ///
 /// [`Profile`]: isr_core::Profile
 #[macro_export]
