@@ -216,12 +216,26 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 ///             // in the nested structures.
 ///             Affinity: Field,  // Defined in _KPROCESS
 ///         }
+///
+///         // Define an alternative name for a structure.
+///         #[isr(alias = "_KLDR_DATA_TABLE_ENTRY")]
+///         struct _LDR_DATA_TABLE_ENTRY {
+///             InLoadOrderLinks: Field,
+///             DllBase: Field,
+///             FullDllName: Field,
+///         }
 ///     }
 /// }
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Use the profile of a Windows 10.0.18362.356 kernel.
-/// # let profile = JsonCodec::decode(include_bytes!("../../../tests/assets/cache/windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"))?;
+/// # let profile = JsonCodec::decode(include_bytes!(
+/// #   concat!(
+/// #     "../../../",
+/// #     "tests/data/cache/",
+/// #     "windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"
+/// #   )
+/// # ))?;
 /// let offsets = Offsets::new(&profile)?;
 ///
 /// let refcnt = offsets._EX_FAST_REF.RefCnt.value_from(0x1234567890abcdef);
@@ -251,17 +265,19 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 ///
 /// # Attributes
 ///
-/// - `#[isr(alias = "alternative_name")]`: Specifies an alternative name for a field.
-///   This is useful if a field might have a different name across OS builds or
-///   kernel versions.
+/// - `#[isr(alias = <alias>)]`: Specifies an alternative name for a field or
+///   structure. This is useful if a field might have a different name across
+///   OS builds or kernel versions.
 ///
-/// - `#[isr(alias = ["name1", "name2", ...])]`: Specifies multiple alternative names for
-///   a field.
+///   `<alias>` can be a single literal or an array of literals, e.g.:
+///   - `#[isr(alias = "alternative_name")]`
+///   - `#[isr(alias = ["name1", "name2", ...])]`
 ///
-/// The generated struct provides a `new` method that takes a reference to an
-/// [`Profile`] and returns a [`Result`] containing the populated struct or an
-/// error if any fields or structures are not found. Each inner struct also
-/// implements the following convenience methods:
+/// The generated struct provides a `new` method that takes a reference to
+/// a [`Profile`] and returns a [`Result`] containing the populated struct or
+/// an error if any fields or structures are not found.
+///
+/// Each inner struct also implements the following convenience methods:
 /// - `is_empty()`: Returns `true` if the structure has zero size.
 /// - `len()`: Returns the size of the structure in bytes.
 /// - `effective_len()`: Returns the offset of the last defined field plus its size.
@@ -295,6 +311,7 @@ macro_rules! offsets {
         [$($meta:tt)*],
         struct $name:ident {
             $(
+                $(#[isr($($iattr:tt)*)])?
                 struct $iname:ident {
                     $(
                         $(#[isr($($fattr:tt)*)])?
@@ -327,6 +344,7 @@ macro_rules! offsets {
     (@inner
         $vis:vis,
         [$($meta:tt)*],
+        $(#[isr($($iattr:tt)*)])?
         struct $iname:ident {
             $(
                 $(#[isr($($fattr:tt)*)])?
@@ -351,9 +369,15 @@ macro_rules! offsets {
             $vis fn new(profile: &$crate::__private::Profile) -> Result<Self, $crate::Error> {
                 use $crate::__private::IntoField as _;
 
+                let name = $crate::offsets!(@find
+                    profile,
+                    $iname,
+                    [$($($iattr)*)?]
+                ).ok_or($crate::Error::type_not_found(stringify!($iname)))?;
+
                 let len = profile
-                    .struct_size(stringify!($iname))
-                    .ok_or($crate::Error::type_not_found(stringify!($iname)))?;
+                    .struct_size(name)
+                    .ok_or($crate::Error::type_not_found(name))?;
                 let mut effective_len: u64 = 0;
 
                 $(
@@ -361,7 +385,7 @@ macro_rules! offsets {
                         effective_len,
                         match $crate::offsets!(@assign
                             profile,
-                            $iname,
+                            name,
                             $fname,
                             [$($($fattr)*)?]
                         ) {
@@ -375,7 +399,7 @@ macro_rules! offsets {
                     $(
                         $fname: $crate::offsets!(@assign
                             profile,
-                            $iname,
+                            name,
                             $fname,
                             [$($($fattr)*)?]
                         ).into_field()?,
@@ -415,6 +439,54 @@ macro_rules! offsets {
         [$($meta:tt)*],
     ) => {};
 
+    //
+    // @find
+    //
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        []
+    ) => {{
+        $profile
+            .find_struct(stringify!($iname))
+            .map(|_| stringify!($iname))
+    }};
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        [alias = $alias:literal]
+    ) => {{
+        $profile
+            .find_struct(stringify!($iname))
+            .map(|_| stringify!($iname))
+            .or_else(|| $profile
+                .find_struct($alias)
+                .map(|_| $alias)
+            )
+    }};
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        [alias = [$($alias:literal),+ $(,)?]]
+    ) => {{
+        $profile
+            .find_struct(stringify!($iname))
+            .map(|_| stringify!($iname))
+            $(
+                .or_else(|| $profile
+                    .find_struct($alias)
+                    .map(|_| $alias)
+                )
+            )+
+    }};
+
+    //
+    // @assign
+    //
+
     (@assign
         $profile:ident,
         $iname:ident,
@@ -424,7 +496,7 @@ macro_rules! offsets {
         use $crate::__private::ProfileExt as _;
 
         $profile
-            .find_field_descriptor(stringify!($iname), stringify!($fname))
+            .find_field_descriptor($iname, stringify!($fname))
     }};
 
     (@assign
@@ -436,9 +508,9 @@ macro_rules! offsets {
         use $crate::__private::ProfileExt as _;
 
         $profile
-            .find_field_descriptor(stringify!($iname), stringify!($fname))
+            .find_field_descriptor($iname, stringify!($fname))
             .or_else(|_| $profile
-                .find_field_descriptor(stringify!($iname), $alias)
+                .find_field_descriptor($iname, $alias)
             )
     }};
 
@@ -451,10 +523,10 @@ macro_rules! offsets {
         use $crate::__private::ProfileExt as _;
 
         $profile
-            .find_field_descriptor(stringify!($iname), stringify!($fname))
+            .find_field_descriptor($iname, stringify!($fname))
             $(
                 .or_else(|_| $profile
-                    .find_field_descriptor(stringify!($iname), $alias)
+                    .find_field_descriptor($iname, $alias)
                 )
             )+
     }};
