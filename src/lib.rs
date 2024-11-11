@@ -56,7 +56,7 @@
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # std::env::set_current_dir("../..")?;
+//! # std::env::set_current_dir("tests/data/tmp")?;
 //! // Create a cache instance.
 //! let cache = IsrCache::<JsonCodec>::new("cache")?;
 //!
