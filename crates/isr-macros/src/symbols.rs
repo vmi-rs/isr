@@ -101,7 +101,12 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 ///   This is useful when the symbol has different names across different OS
 ///   builds or versions.
 ///
-///   `<alias>` can be a single literal or an array of literals, e.g.:
+/// - `#[isr(override = <override>)]`: Overrides the symbol name with a custom
+///   name. This is useful when the symbol name should be different from the
+///   field name.
+///
+///   `<alias>` and `<override>` can be a single literal or an array
+///   of literals, e.g.:
 ///   - `#[isr(alias = "alternative_name")]`
 ///   - `#[isr(alias = ["name1", "name2", ...])]`
 ///
@@ -182,6 +187,32 @@ macro_rules! symbols {
             $(
                 .or_else(|_| $profile
                     .find_symbol_descriptor($alias)
+                )
+            )+
+    }};
+
+    (@assign
+        $profile:ident,
+        $fname:ident,
+        [override = $override:literal]
+    ) => {{
+        use $crate::__private::ProfileExt as _;
+
+        $profile
+            .find_symbol_descriptor($override)
+    }};
+
+    (@assign
+        $profile:ident,
+        $fname:ident,
+        [override = [$($override:literal),+ $(,)?]]
+    ) => {{
+        use $crate::__private::ProfileExt as _;
+
+        Err($crate::Error::symbol_not_found(stringify!($fname)))
+            $(
+                .or_else(|_| $profile
+                    .find_symbol_descriptor($override)
                 )
             )+
     }};
