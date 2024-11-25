@@ -42,7 +42,7 @@ debug = 1
 
 [package]
 name = "isr"
-version = "0.1.1"
+version = "0.1.2"
 license = "MIT"
 authors = { workspace = true }
 edition = { workspace = true }
@@ -66,7 +66,7 @@ rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", 
 
 [dependencies]
 isr-core = { path = "./crates/isr-core", version = "0.1.1" }
-isr-macros = { path = "./crates/isr-macros", version = "0.1.1" }
+isr-macros = { path = "./crates/isr-macros", version = "0.1.2" }
 
 isr-cache = { path = "./crates/isr-cache", version = "0.1.1", optional = true }
 
