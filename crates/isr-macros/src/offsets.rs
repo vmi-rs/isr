@@ -10,10 +10,28 @@ use crate::Error;
 #[derive(Debug, Clone, Copy)]
 pub struct Field {
     /// The offset of the field from the beginning of the structure, in bytes.
-    pub offset: u64,
+    pub(crate) offset: u64,
 
     /// The size of the field, in bytes.
-    pub size: u64,
+    pub(crate) size: u64,
+}
+
+impl Field {
+    /// Creates a new field descriptor.
+    pub fn new(offset: u64, size: u64) -> Self {
+        Self { offset, size }
+    }
+
+    /// Returns the offset of the field from the beginning of the structure,
+    /// in bytes.
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the size of the field, in bytes.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
 }
 
 /// A bitfield within a structure.
@@ -23,25 +41,46 @@ pub struct Field {
 /// by allowing access to individual bits within a field.
 #[derive(Debug, Clone, Copy)]
 pub struct Bitfield {
-    /// The offset of the bitfield from the beginning of the structure, in bytes.
-    pub offset: u64,
-
-    /// The size of the underlying field containing the bitfield, in bytes.
-    pub size: u64,
+    pub(crate) field: Field,
 
     /// The starting bit position of the bitfield within the underlying field.
-    pub bit_position: u64,
+    pub(crate) bit_position: u64,
 
     /// The length of the bitfield, in bits.
-    pub bit_length: u64,
+    pub(crate) bit_length: u64,
+}
+
+impl std::ops::Deref for Bitfield {
+    type Target = Field;
+
+    fn deref(&self) -> &Self::Target {
+        &self.field
+    }
 }
 
 impl Bitfield {
-    /// Extracts the bitfield value from a given integer.
-    ///
+    /// Creates a new bitfield descriptor.
+    pub fn new(offset: u64, size: u64, bit_position: u64, bit_length: u64) -> Self {
+        Self {
+            field: Field::new(offset, size),
+            bit_position,
+            bit_length,
+        }
+    }
+
+    /// Returns the starting bit position of the bitfield within the underlying field.
+    pub fn bit_position(&self) -> u64 {
+        self.bit_position
+    }
+
+    /// Returns the length of the bitfield, in bits.
+    pub fn bit_length(&self) -> u64 {
+        self.bit_length
+    }
+
     /// This method performs bitwise operations to isolate and return the
     /// value represented by the bitfield within the provided integer.
-    pub fn value_from(&self, value: u64) -> u64 {
+    pub fn extract(&self, value: u64) -> u64 {
         let result = value >> self.bit_position;
         let result = result & ((1 << self.bit_length) - 1);
 

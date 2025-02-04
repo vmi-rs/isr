@@ -47,8 +47,10 @@ impl ProfileExt for Profile<'_> {
         if let Some(field) = udt.fields.get(field_name) {
             if let Type::Bitfield(bitfield) = &field.type_ {
                 return Some(Bitfield {
-                    offset: field.offset,
-                    size: self.type_size(&field.type_)?,
+                    field: Field {
+                        offset: field.offset,
+                        size: self.type_size(&field.type_)?,
+                    },
                     bit_position: bitfield.bit_position,
                     bit_length: bitfield.bit_length,
                 });
@@ -63,8 +65,10 @@ impl ProfileExt for Profile<'_> {
 
             if let Some(child) = self.find_bitfield(&udt.name, field_name) {
                 return Some(Bitfield {
-                    offset: field.offset + child.offset,
-                    size: child.size,
+                    field: Field {
+                        offset: field.offset + child.offset,
+                        size: child.size,
+                    },
                     bit_position: child.bit_position,
                     bit_length: child.bit_length,
                 });
@@ -94,12 +98,14 @@ impl ProfileExt for Profile<'_> {
         if let Some(field) = udt.fields.get(field_name) {
             return Ok(match &field.type_ {
                 Type::Bitfield(bitfield) => FieldDescriptor::Bitfield(Bitfield {
-                    offset: field.offset,
-                    size: match self.type_size(&field.type_) {
-                        Some(size) => size,
-                        None => {
-                            return Err(Error::field_not_found(type_name, field_name));
-                        }
+                    field: Field {
+                        offset: field.offset,
+                        size: match self.type_size(&field.type_) {
+                            Some(size) => size,
+                            None => {
+                                return Err(Error::field_not_found(type_name, field_name));
+                            }
+                        },
                     },
                     bit_position: bitfield.bit_position,
                     bit_length: bitfield.bit_length,
@@ -129,8 +135,10 @@ impl ProfileExt for Profile<'_> {
                         size: child.size,
                     }),
                     FieldDescriptor::Bitfield(child) => FieldDescriptor::Bitfield(Bitfield {
-                        offset: field.offset + child.offset,
-                        size: child.size,
+                        field: Field {
+                            offset: field.offset + child.offset,
+                            size: child.size,
+                        },
                         bit_position: child.bit_position,
                         bit_length: child.bit_length,
                     }),
