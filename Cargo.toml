@@ -33,6 +33,17 @@ thiserror = "2.0"
 tracing = "0.1"
 url = "2.5"
 
+isr-core = { path = "./crates/isr-core", version = "0.2.0" }
+isr-macros = { path = "./crates/isr-macros", version = "0.2.0" }
+
+isr-cache = { path = "./crates/isr-cache", version = "0.2.0" }
+
+isr-dwarf = { path = "./crates/isr-dwarf", version = "0.2.0" }
+isr-pdb = { path = "./crates/isr-pdb", version = "0.2.0" }
+
+isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.2.0" }
+isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.2.0" }
+
 [profile.release]
 debug = 1
 
@@ -42,7 +53,7 @@ debug = 1
 
 [package]
 name = "isr"
-version = "0.1.2"
+version = "0.2.0"
 license = "MIT"
 authors = { workspace = true }
 edition = { workspace = true }
@@ -65,16 +76,16 @@ cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
 
 [dependencies]
-isr-core = { path = "./crates/isr-core", version = "0.1.1" }
-isr-macros = { path = "./crates/isr-macros", version = "0.1.2" }
+isr-core = { workspace = true }
+isr-macros = { workspace = true }
 
-isr-cache = { path = "./crates/isr-cache", version = "0.1.1", optional = true }
+isr-cache = { workspace = true, optional = true }
 
-isr-dwarf = { path = "./crates/isr-dwarf", version = "0.1.1", optional = true }
-isr-pdb = { path = "./crates/isr-pdb", version = "0.1.1", optional = true }
+isr-dwarf = { workspace = true, optional = true }
+isr-pdb = { workspace = true, optional = true }
 
-isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.1.1", optional = true }
-isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.1.1", optional = true }
+isr-dl-linux = { workspace = true, optional = true }
+isr-dl-pdb = { workspace = true, optional = true }
 
 [features]
 default = [
