@@ -568,7 +568,6 @@ fn __type_from_array_type<'data>(
     })
 }
 
-#[allow(unused)]
 fn __dump_attrs<'data>(
     unit: &UnitRef<Reader<'data>>,
     entry: &DebuggingInformationEntry<Reader<'data>>,
