@@ -13,5 +13,5 @@ pub enum Error {
     InvalidSystemMap,
 
     #[error("Serialization error: {0}")]
-    Serialize(Box<dyn std::error::Error>),
+    Serialize(Box<dyn std::error::Error + Send + Sync>),
 }

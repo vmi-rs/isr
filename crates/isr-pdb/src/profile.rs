@@ -8,7 +8,7 @@ use super::{symbols::PdbSymbols as _, types::PdbTypes as _, Error};
 pub fn create_profile<F, E>(pdb_file: File, serialize: F) -> Result<(), Error>
 where
     F: FnOnce(&Profile) -> Result<(), E>,
-    E: std::error::Error + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     let mut pdb = PDB::open(pdb_file)?;
 

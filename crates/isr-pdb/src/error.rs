@@ -7,5 +7,5 @@ pub enum Error {
     Pdb(#[from] pdb::Error),
 
     #[error("Serialization error: {0}")]
-    Serialize(Box<dyn std::error::Error>),
+    Serialize(Box<dyn std::error::Error + Send + Sync>),
 }

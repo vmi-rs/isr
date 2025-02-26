@@ -17,7 +17,7 @@ pub fn create_profile<F, E>(
 ) -> Result<(), Error>
 where
     F: FnOnce(&Profile) -> Result<(), E>,
-    E: std::error::Error + 'static,
+    E: std::error::Error + Send + Sync + 'static,
 {
     let kernel_mmap = unsafe { memmap2::Mmap::map(&kernel_file)? };
     let object = object::File::parse(&*kernel_mmap)?;

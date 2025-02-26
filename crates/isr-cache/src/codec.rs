@@ -8,10 +8,10 @@ pub trait Codec {
     const EXTENSION: &'static str;
 
     /// The error type for encoding.
-    type EncodeError: std::error::Error + 'static;
+    type EncodeError: std::error::Error + Send + Sync + 'static;
 
     /// The error type for decoding.
-    type DecodeError: std::error::Error + 'static;
+    type DecodeError: std::error::Error + Send + Sync + 'static;
 
     /// Encodes a profile into the given writer.
     fn encode(writer: impl Write, profile: &Profile) -> Result<(), Self::EncodeError>;
