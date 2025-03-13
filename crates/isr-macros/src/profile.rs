@@ -1,6 +1,6 @@
-use isr_core::{types::Type, Profile};
+use isr_core::{Profile, types::Type};
 
-use crate::{offsets::FieldDescriptor, symbols::SymbolDescriptor, Bitfield, Error, Field};
+use crate::{Bitfield, Error, Field, offsets::FieldDescriptor, symbols::SymbolDescriptor};
 
 pub trait ProfileExt {
     fn find_field(&self, type_name: &str, field_name: &str) -> Option<Field>;

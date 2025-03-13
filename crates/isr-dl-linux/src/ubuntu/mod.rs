@@ -440,7 +440,7 @@ fn path_from_url(
     filename: Filename,
 ) -> Result<PathBuf, Error> {
     fn extract_file_name_from_url(url: &Url) -> Option<String> {
-        url.path_segments()?.last().map(ToString::to_string)
+        url.path_segments()?.next_back().map(ToString::to_string)
     }
 
     match filename {

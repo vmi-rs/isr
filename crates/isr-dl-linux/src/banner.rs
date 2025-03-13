@@ -47,11 +47,7 @@ impl LinuxBanner {
             .unwrap()
         });
 
-        let captures = match LINUX_VERSION_REGEX.captures(banner) {
-            Some(captures) => captures,
-            None => return None,
-        };
-
+        let captures = LINUX_VERSION_REGEX.captures(banner)?;
         let version_signature = try_parse_ubuntu_signature(&captures["UTS_VERSION"]);
 
         Some(Self {
@@ -79,10 +75,7 @@ fn try_parse_ubuntu_signature(uts_version: &str) -> Option<LinuxVersionSignature
         .unwrap()
     });
 
-    let captures = match UBUNTU_VERSION_REGEX.captures(uts_version) {
-        Some(captures) => captures,
-        None => return None,
-    };
+    let captures = UBUNTU_VERSION_REGEX.captures(uts_version)?;
 
     Some(LinuxVersionSignature::Ubuntu(UbuntuVersionSignature {
         release: captures["UBUNTU_RELEASE"].into(),

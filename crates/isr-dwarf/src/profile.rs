@@ -1,13 +1,13 @@
 use std::{borrow::Cow, fs::File, io::Read};
 
 use gimli::RunTimeEndian;
-use isr_core::{types::Types, Profile, Symbols};
+use isr_core::{Profile, Symbols, types::Types};
 use object::{Endianness, Object as _};
 
 use super::{
+    Error,
     symbols::SystemMapSymbols as _,
     types::{DwarfCache, DwarfTypes as _},
-    Error,
 };
 
 pub fn create_profile<F, E>(

@@ -1,9 +1,9 @@
 use std::fs::File;
 
-use isr_core::{types::Types, Profile, Symbols};
+use isr_core::{Profile, Symbols, types::Types};
 use pdb::PDB;
 
-use super::{symbols::PdbSymbols as _, types::PdbTypes as _, Error};
+use super::{Error, symbols::PdbSymbols as _, types::PdbTypes as _};
 
 pub fn create_profile<F, E>(pdb_file: File, serialize: F) -> Result<(), Error>
 where

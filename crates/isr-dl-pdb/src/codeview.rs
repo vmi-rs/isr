@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use object::{
-    read::pe::{ImageNtHeaders, PeFile, PeFile32, PeFile64},
     FileKind, Object,
+    read::pe::{ImageNtHeaders, PeFile, PeFile32, PeFile64},
 };
 
 /// CodeView information extracted from a PDB file.
