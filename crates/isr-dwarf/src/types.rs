@@ -143,7 +143,7 @@ impl<'data> DwarfTypes<'data> for Types<'data> {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(name))]
+    #[tracing::instrument(skip_all, err, fields(name))]
     fn add_enum(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -193,7 +193,7 @@ impl<'data> DwarfTypes<'data> for Types<'data> {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(name))]
+    #[tracing::instrument(skip_all, err, fields(name))]
     fn add_struct(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -262,7 +262,7 @@ impl<'data> DwarfStruct<'data> for Struct<'data> {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(name))]
+    #[tracing::instrument(skip_all, err, fields(name))]
     fn add_field(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -321,7 +321,7 @@ impl<'data> DwarfEnum<'data> for Enum<'data> {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(name))]
+    #[tracing::instrument(skip_all, err, fields(name))]
     fn add_field(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -433,7 +433,7 @@ impl<'data> DwarfType<'data> for Type<'data> {
     }
 }
 
-#[tracing::instrument(skip_all, fields(name))]
+#[tracing::instrument(skip_all, err, fields(name))]
 fn __type_from_base_type<'data>(
     unit: &UnitRef<Reader<'data>>,
     node: EntriesTreeNode<Reader<'data>>,
