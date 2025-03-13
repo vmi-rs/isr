@@ -30,15 +30,18 @@ pub struct BincodeCodec;
 impl Codec for BincodeCodec {
     const EXTENSION: &'static str = "bin";
 
-    type EncodeError = bincode::Error;
-    type DecodeError = bincode::Error;
+    type EncodeError = bincode::error::EncodeError;
+    type DecodeError = bincode::error::DecodeError;
 
-    fn encode(writer: impl Write, profile: &Profile) -> Result<(), Self::EncodeError> {
-        bincode::serialize_into(writer, profile)
+    fn encode(mut writer: impl Write, profile: &Profile) -> Result<(), Self::EncodeError> {
+        bincode::serde::encode_into_std_write(profile, &mut writer, bincode::config::standard())?;
+        Ok(())
     }
 
     fn decode(slice: &[u8]) -> Result<Profile, Self::DecodeError> {
-        bincode::deserialize(slice)
+        let (result, _bytes_read) =
+            bincode::serde::borrow_decode_from_slice(slice, bincode::config::standard())?;
+        Ok(result)
     }
 }
 
