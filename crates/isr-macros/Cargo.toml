@@ -19,7 +19,7 @@ indexmap = { workspace = true, features = ["serde"] }
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-smallvec = { workspace = true , features = ["serde"] }
+smallvec = { workspace = true , features = ["serde", "union"] }
 thiserror = { workspace = true }
 
 isr-core = { workspace = true }

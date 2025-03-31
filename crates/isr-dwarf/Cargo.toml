@@ -19,7 +19,7 @@ gimli = { workspace = true }
 indexmap = { workspace = true }
 memmap2 = { workspace = true }
 object = { workspace = true }
-smallvec = { workspace = true }
+smallvec = { workspace = true, features = ["union"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
