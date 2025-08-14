@@ -133,7 +133,7 @@ where
     }
 
     /// Decodes the profile from the entry.
-    pub fn profile(&self) -> Result<Profile, C::DecodeError> {
+    pub fn profile(&self) -> Result<Profile<'_>, C::DecodeError> {
         C::decode(&self.data)
     }
 }

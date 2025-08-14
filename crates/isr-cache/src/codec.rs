@@ -17,7 +17,7 @@ pub trait Codec {
     fn encode(writer: impl Write, profile: &Profile) -> Result<(), Self::EncodeError>;
 
     /// Decodes a profile from the given slice.
-    fn decode(slice: &[u8]) -> Result<Profile, Self::DecodeError>;
+    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError>;
 }
 
 /// A codec for the bincode format.
@@ -38,7 +38,7 @@ impl Codec for BincodeCodec {
         Ok(())
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile, Self::DecodeError> {
+    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
         let (result, _bytes_read) =
             bincode::serde::borrow_decode_from_slice(slice, bincode::config::standard())?;
         Ok(result)
@@ -62,7 +62,7 @@ impl Codec for JsonCodec {
         serde_json::to_writer_pretty(writer, profile)
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile, Self::DecodeError> {
+    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
         serde_json::from_slice(slice)
     }
 }
@@ -84,7 +84,7 @@ impl Codec for MsgpackCodec {
         rmp_serde::encode::write(&mut writer, profile)
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile, Self::DecodeError> {
+    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
         rmp_serde::from_slice(slice)
     }
 }

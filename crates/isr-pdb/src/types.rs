@@ -9,7 +9,7 @@ use pdb::{
     TypeData, TypeFinder, TypeIndex, UnionType,
 };
 
-fn type_name(name: RawString, index: TypeIndex) -> Cow<'_, str> {
+fn type_name(name: RawString<'_>, index: TypeIndex) -> Cow<'_, str> {
     let name = String::from_utf8_lossy(name.as_bytes());
 
     if name.starts_with("<anonymous-")

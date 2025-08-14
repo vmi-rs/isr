@@ -44,7 +44,7 @@ impl<'a> Profile<'a> {
     }
 
     /// Returns the types.
-    pub fn types(&self) -> &Types {
+    pub fn types(&self) -> &Types<'_> {
         &self.types
     }
 
@@ -98,12 +98,12 @@ impl<'a> Profile<'a> {
     }
 
     /// Finds an enum by name.
-    pub fn find_enum(&self, type_name: &str) -> Option<&Enum> {
+    pub fn find_enum(&self, type_name: &str) -> Option<&Enum<'_>> {
         self.types.enums.get(type_name)
     }
 
     /// Finds a struct by name.
-    pub fn find_struct(&self, type_name: &str) -> Option<&Struct> {
+    pub fn find_struct(&self, type_name: &str) -> Option<&Struct<'_>> {
         self.types.structs.get(type_name)
     }
 }
