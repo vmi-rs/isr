@@ -5,6 +5,8 @@ members = [
 resolver = "2"
 
 [workspace.package]
+version = "0.4.0"
+
 authors = ["Petr Benes <w.benny@outlook.com>"]
 edition = "2024"
 license = "MIT"
@@ -17,11 +19,11 @@ repository = "https://github.com/vmi-rs/isr"
 [workspace.dependencies]
 bincode = "2"
 debpkg = "0.6"
-flate2 = "1.0"
-gimli = "0.31"
+flate2 = "1.1"
+gimli = "0.32"
 indexmap = "2"
 memmap2 = "0.9"
-object = "0.36"
+object = "0.37"
 pdb = "0.8"
 regex = "1"
 reqwest = "0.12"
@@ -33,16 +35,16 @@ thiserror = "2.0"
 tracing = "0.1"
 url = "2.5"
 
-isr-core = { path = "./crates/isr-core", version = "0.3.0" }
-isr-macros = { path = "./crates/isr-macros", version = "0.3.0" }
+isr-core = { path = "./crates/isr-core", version = "0.4.0" }
+isr-macros = { path = "./crates/isr-macros", version = "0.4.0" }
 
-isr-cache = { path = "./crates/isr-cache", version = "0.3.0" }
+isr-cache = { path = "./crates/isr-cache", version = "0.4.0" }
 
-isr-dwarf = { path = "./crates/isr-dwarf", version = "0.3.0" }
-isr-pdb = { path = "./crates/isr-pdb", version = "0.3.0" }
+isr-dwarf = { path = "./crates/isr-dwarf", version = "0.4.0" }
+isr-pdb = { path = "./crates/isr-pdb", version = "0.4.0" }
 
-isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.3.0" }
-isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.3.0" }
+isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.4.0" }
+isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.4.0" }
 
 [profile.release]
 debug = 1
@@ -53,8 +55,8 @@ debug = 1
 
 [package]
 name = "isr"
-version = "0.3.0"
-license = "MIT"
+version = { workspace = true }
+license = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 publish = { workspace = true }
