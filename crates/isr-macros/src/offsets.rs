@@ -84,7 +84,7 @@ impl Bitfield {
         let result = value >> self.bit_position;
         let result = result & ((1 << self.bit_length) - 1);
 
-        #[expect(clippy::let_and_return)]
+        #[allow(clippy::let_and_return)]
         result
     }
 }
