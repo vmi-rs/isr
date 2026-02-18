@@ -37,7 +37,7 @@ pub trait DebuggingInformationEntryExt<'data> {
     fn type_<'a>(
         &self,
         unit: &'a UnitRef<'a, Reader<'data>>,
-    ) -> Result<Option<EntriesTree<'a, 'a, Reader<'data>>>, Error>;
+    ) -> Result<Option<EntriesTree<'a, Reader<'data>>>, Error>;
     fn decl_file(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
     fn decl_file_index(&self) -> Result<Option<u64>, Error>;
     fn decl_line(&self) -> Result<Option<u64>, Error>;
@@ -52,11 +52,9 @@ pub trait DebuggingInformationEntryExt<'data> {
     fn upper_bound(&self) -> Result<Option<u64>, Error>;
 }
 
-impl<'data> DebuggingInformationEntryExt<'data>
-    for DebuggingInformationEntry<'_, '_, Reader<'data>>
-{
+impl<'data> DebuggingInformationEntryExt<'data> for DebuggingInformationEntry<Reader<'data>> {
     fn name(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error> {
-        match self.attr(gimli::DW_AT_name)?.as_ref().map(Attribute::value) {
+        match self.attr(gimli::DW_AT_name).map(Attribute::value) {
             Some(name) => Ok(Some(unit.attr_string(name)?.to_string_lossy()?.to_string())),
             None => Ok(None),
         }
@@ -65,8 +63,8 @@ impl<'data> DebuggingInformationEntryExt<'data>
     fn type_<'a>(
         &self,
         unit: &'a UnitRef<Reader<'data>>,
-    ) -> Result<Option<EntriesTree<'a, 'a, Reader<'data>>>, Error> {
-        match self.attr(gimli::DW_AT_type)?.as_ref().map(Attribute::value) {
+    ) -> Result<Option<EntriesTree<'a, Reader<'data>>>, Error> {
+        match self.attr(gimli::DW_AT_type).map(Attribute::value) {
             Some(AttributeValue::UnitRef(offset)) => Ok(Some(unit.entries_tree(Some(offset))?)),
             _ => Ok(None),
         }
@@ -95,11 +93,7 @@ impl<'data> DebuggingInformationEntryExt<'data>
     }
 
     fn decl_file_index(&self) -> Result<Option<u64>, Error> {
-        match self
-            .attr(gimli::DW_AT_decl_file)?
-            .as_ref()
-            .map(Attribute::value)
-        {
+        match self.attr(gimli::DW_AT_decl_file).map(Attribute::value) {
             Some(AttributeValue::FileIndex(file)) => Ok(Some(file)),
             _ => Ok(None),
         }
@@ -107,70 +101,55 @@ impl<'data> DebuggingInformationEntryExt<'data>
 
     fn decl_line(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_decl_line)?
-            .as_ref()
+            .attr(gimli::DW_AT_decl_line)
             .and_then(Attribute::udata_value))
     }
 
     fn decl_column(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_decl_column)?
-            .as_ref()
+            .attr(gimli::DW_AT_decl_column)
             .and_then(Attribute::udata_value))
     }
 
     fn bit_size(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_bit_size)?
-            .as_ref()
+            .attr(gimli::DW_AT_bit_size)
             .and_then(Attribute::udata_value))
     }
 
     fn byte_size(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_byte_size)?
-            .as_ref()
+            .attr(gimli::DW_AT_byte_size)
             .and_then(Attribute::udata_value))
     }
 
     fn count(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_count)?
-            .as_ref()
+            .attr(gimli::DW_AT_count)
             .and_then(Attribute::udata_value))
     }
 
     fn data_bit_offset(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_data_bit_offset)?
-            .as_ref()
+            .attr(gimli::DW_AT_data_bit_offset)
             .and_then(Attribute::udata_value))
     }
 
     fn data_member_location(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_data_member_location)?
-            .as_ref()
+            .attr(gimli::DW_AT_data_member_location)
             .and_then(Attribute::udata_value))
     }
 
     fn declaration(&self) -> Result<Option<bool>, Error> {
-        match self
-            .attr(gimli::DW_AT_declaration)?
-            .as_ref()
-            .map(Attribute::value)
-        {
+        match self.attr(gimli::DW_AT_declaration).map(Attribute::value) {
             Some(AttributeValue::Flag(flag)) => Ok(Some(flag)),
             _ => Ok(Some(false)),
         }
     }
 
     fn encoding(&self) -> Result<Option<DwAte>, Error> {
-        match self
-            .attr(gimli::DW_AT_encoding)?
-            .as_ref()
-            .map(Attribute::value)
-        {
+        match self.attr(gimli::DW_AT_encoding).map(Attribute::value) {
             Some(AttributeValue::Encoding(encoding)) => Ok(Some(encoding)),
             _ => Ok(None),
         }
@@ -178,8 +157,7 @@ impl<'data> DebuggingInformationEntryExt<'data>
 
     fn upper_bound(&self) -> Result<Option<u64>, Error> {
         Ok(self
-            .attr(gimli::DW_AT_upper_bound)?
-            .as_ref()
+            .attr(gimli::DW_AT_upper_bound)
             .and_then(Attribute::udata_value))
     }
 }

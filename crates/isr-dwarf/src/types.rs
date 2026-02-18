@@ -1,8 +1,7 @@
 use std::borrow::Cow;
 
 use gimli::{
-    Attribute, DebuggingInformationEntry, EntriesTree, EntriesTreeNode, Error, Reader as _,
-    UnitRef, UnitSectionOffset,
+    Attribute, DebuggingInformationEntry, EntriesTree, EntriesTreeNode, Error, Reader as _, UnitRef,
 };
 use indexmap::map::Entry;
 use isr_core::types::{
@@ -19,11 +18,7 @@ fn type_name<'data>(
     match entry.name(unit)? {
         Some(name) => Ok(name.into()),
         None => {
-            let offset = match entry.offset().to_unit_section_offset(unit) {
-                UnitSectionOffset::DebugInfoOffset(offset) => offset.0,
-                UnitSectionOffset::DebugTypesOffset(offset) => offset.0,
-            };
-
+            let offset = entry.offset().to_unit_section_offset(unit).0;
             Ok(format!("__unnamed_{:x}", offset).into())
         }
     }
@@ -336,8 +331,7 @@ impl<'data> DwarfEnum<'data> for Enum<'data> {
 
         let value = match node
             .entry()
-            .attr(gimli::DW_AT_const_value)?
-            .as_ref()
+            .attr(gimli::DW_AT_const_value)
             .map(Attribute::value)
         {
             Some(value) => {
@@ -571,8 +565,7 @@ fn __dump_attrs<'data>(
     unit: &UnitRef<Reader<'data>>,
     entry: &DebuggingInformationEntry<Reader<'data>>,
 ) -> Result<(), Error> {
-    let mut attrs = entry.attrs();
-    while let Some(attr) = attrs.next()? {
+    for attr in entry.attrs() {
         print!("   {}: {:?}", attr.name(), attr.value());
         if let Ok(s) = unit.attr_string(attr.value()) {
             print!(" '{}'", s.to_string_lossy()?);
