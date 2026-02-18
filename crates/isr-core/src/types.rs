@@ -7,8 +7,6 @@ use std::borrow::Cow;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Types<'a> {
     #[serde(borrow)]
@@ -179,7 +177,7 @@ pub struct ArrayRef<'a> {
     pub subtype: Box<Type<'a>>,
 
     /// Array dimensions.
-    pub dims: SmallVec<[u64; 4]>,
+    pub dims: Vec<u64>,
 
     /// Total number of elements.
     pub size: u64,

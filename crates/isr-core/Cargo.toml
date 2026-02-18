@@ -17,4 +17,3 @@ keywords = [
 [dependencies]
 indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
-smallvec = { workspace = true , features = ["serde", "union"] }

@@ -9,7 +9,6 @@ use isr_core::types::{
     ArrayRef, BaseRef, BitfieldRef, Enum, EnumRef, Field, PointerRef, Struct, StructKind,
     StructRef, Type, Types, Variant,
 };
-use smallvec::SmallVec;
 
 use super::_gimli::{DebuggingInformationEntryExt as _, Reader};
 
@@ -534,7 +533,7 @@ fn __type_from_array_type<'data>(
     let node = type_.root()?;
     debug_assert_eq!(node.entry().tag(), gimli::DW_TAG_array_type);
 
-    let mut dimensions = SmallVec::<[Option<u64>; 4]>::new();
+    let mut dimensions = Vec::<Option<u64>>::new();
     let mut children = node.children();
 
     // Parse array dimensions.
