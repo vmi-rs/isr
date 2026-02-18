@@ -54,8 +54,10 @@ impl<'a> Profile<'a> {
             Type::Base(r) => Some(self.base_size(r)),
             Type::Enum(r) => self.enum_size(&r.name),
             Type::Struct(r) => self.struct_size(&r.name),
-            Type::Array(r) => self.type_size(&r.subtype),
-            Type::Pointer(_) => Some(self.pointer_size()),
+            Type::Array(r) => self
+                .type_size(&r.subtype)
+                .map(|subtype_size| subtype_size * r.dims.iter().product::<u64>()),
+            Type::Pointer(r) => Some(r.size),
             Type::Bitfield(r) => self.type_size(&r.subtype),
             Type::Function => Some(self.pointer_size()),
         }
@@ -63,14 +65,7 @@ impl<'a> Profile<'a> {
 
     /// Returns the size of a base type in bytes.
     pub fn base_size(&self, base: &BaseRef) -> u64 {
-        match base {
-            BaseRef::Void => 0,
-            BaseRef::Bool | BaseRef::Char | BaseRef::I8 | BaseRef::U8 | BaseRef::F8 => 1,
-            BaseRef::Wchar | BaseRef::I16 | BaseRef::U16 | BaseRef::F16 => 2,
-            BaseRef::I32 | BaseRef::U32 | BaseRef::F32 => 4,
-            BaseRef::I64 | BaseRef::U64 | BaseRef::F64 => 8,
-            BaseRef::I128 | BaseRef::U128 | BaseRef::F128 => 16,
-        }
+        base.size()
     }
 
     /// Returns the size of an enum type in bytes.

@@ -5,10 +5,11 @@ use isr_core::types::{
     StructRef, Type, Types, Variant,
 };
 use pdb::{
-    ClassKind, ClassType, EnumerationType, Error, ItemFinder, ItemIter, PrimitiveKind, RawString,
-    TypeData, TypeFinder, TypeIndex, UnionType,
+    ClassKind, ClassType, EnumerationType, Error, Indirection, ItemFinder, ItemIter, PointerKind,
+    PrimitiveKind, RawString, TypeData, TypeFinder, TypeIndex, UnionType,
 };
 
+/// Returns the type name, handling anonymous types.
 fn type_name(name: RawString<'_>, index: TypeIndex) -> Cow<'_, str> {
     let name = String::from_utf8_lossy(name.as_bytes());
 
@@ -20,6 +21,79 @@ fn type_name(name: RawString<'_>, index: TypeIndex) -> Cow<'_, str> {
     }
 
     name
+}
+
+/// Returns the size of a type in bytes.
+fn type_size(type_finder: &TypeFinder, type_index: TypeIndex) -> Result<u64, Error> {
+    let size = match type_finder.find(type_index)?.parse()? {
+        TypeData::Primitive(data) => {
+            let mut size = match data.kind {
+                PrimitiveKind::Char
+                | PrimitiveKind::RChar
+                | PrimitiveKind::UChar
+                | PrimitiveKind::I8
+                | PrimitiveKind::U8
+                | PrimitiveKind::Bool8 => 1,
+
+                PrimitiveKind::WChar
+                | PrimitiveKind::RChar16
+                | PrimitiveKind::I16
+                | PrimitiveKind::Short
+                | PrimitiveKind::U16
+                | PrimitiveKind::UShort
+                | PrimitiveKind::Bool16 => 2,
+
+                PrimitiveKind::RChar32
+                | PrimitiveKind::I32
+                | PrimitiveKind::Long
+                | PrimitiveKind::U32
+                | PrimitiveKind::ULong
+                | PrimitiveKind::F32
+                | PrimitiveKind::Bool32 => 4,
+
+                PrimitiveKind::I64
+                | PrimitiveKind::Quad
+                | PrimitiveKind::U64
+                | PrimitiveKind::UQuad
+                | PrimitiveKind::F64
+                | PrimitiveKind::Bool64 => 8,
+
+                _ => 0,
+            };
+
+            if let Some(indirection) = data.indirection {
+                size = match indirection {
+                    Indirection::Near16 | Indirection::Far16 | Indirection::Huge16 => 2,
+                    Indirection::Near32 | Indirection::Far32 => 4,
+                    Indirection::Near64 => 8,
+                    Indirection::Near128 => 16,
+                };
+            }
+
+            size
+        }
+        TypeData::Class(data) => data.size,
+        TypeData::Enumeration(data) => type_size(type_finder, data.underlying_type)?,
+        TypeData::Union(data) => data.size,
+        TypeData::Pointer(data) => match data.attributes.pointer_kind() {
+            PointerKind::Near16 | PointerKind::Far16 | PointerKind::Huge16 => 2,
+            PointerKind::Near32
+            | PointerKind::Far32
+            | PointerKind::BaseSeg
+            | PointerKind::BaseVal
+            | PointerKind::BaseSegVal
+            | PointerKind::BaseAddr
+            | PointerKind::BaseSegAddr
+            | PointerKind::BaseType
+            | PointerKind::BaseSelf => 4,
+            PointerKind::Ptr64 => 8,
+        },
+        TypeData::Modifier(data) => type_size(type_finder, data.underlying_type)?,
+        TypeData::Array(data) => data.dimensions.into_iter().last().unwrap_or(0) as u64,
+        _ => 0,
+    };
+
+    Ok(size)
 }
 
 pub trait PdbTypes<'p>
@@ -85,23 +159,7 @@ where
     fn new(type_finder: &TypeFinder<'p>, type_index: TypeIndex) -> Result<Self, Error>;
 }
 
-/*
-impl From<pdb::Variant> for Variant {
-    fn from(value: pdb::Variant) -> Self {
-        match value {
-            pdb::Variant::U8(v) => Self::U8(v),
-            pdb::Variant::U16(v) => Self::U16(v),
-            pdb::Variant::U32(v) => Self::U32(v),
-            pdb::Variant::U64(v) => Self::U64(v),
-            pdb::Variant::I8(v) => Self::I8(v),
-            pdb::Variant::I16(v) => Self::I16(v),
-            pdb::Variant::I32(v) => Self::I32(v),
-            pdb::Variant::I64(v) => Self::I64(v),
-        }
-    }
-}
-*/
-
+/// Converts a `pdb::Variant` to a `Variant`.
 fn convert_variant(variant: pdb::Variant) -> Variant {
     match variant {
         pdb::Variant::U8(value) => Variant::U8(value),
@@ -358,8 +416,14 @@ impl<'p> PdbType<'p> for Type<'p> {
     fn new(type_finder: &TypeFinder<'p>, type_index: TypeIndex) -> Result<Self, Error> {
         let result = match type_finder.find(type_index)?.parse()? {
             TypeData::Primitive(data) => match data.indirection {
-                Some(_indirection) => Self::Pointer(PointerRef {
+                Some(indirection) => Self::Pointer(PointerRef {
                     subtype: Box::new(from_primitive_kind(data.kind)),
+                    size: match indirection {
+                        Indirection::Near16 | Indirection::Far16 | Indirection::Huge16 => 2,
+                        Indirection::Near32 | Indirection::Far32 => 4,
+                        Indirection::Near64 => 8,
+                        Indirection::Near128 => 16,
+                    },
                 }),
                 None => from_primitive_kind(data.kind),
             },
@@ -376,14 +440,58 @@ impl<'p> PdbType<'p> for Type<'p> {
                 name: type_name(data.name, type_index),
             }),
 
-            TypeData::Array(data) => Self::Array(ArrayRef {
-                subtype: Box::new(Self::new(type_finder, data.element_type)?),
-                dims: data.dimensions.iter().map(|dim| *dim as u64).collect(),
-                size: data.dimensions.into_iter().product::<u32>() as u64,
-            }),
+            TypeData::Array(data) => {
+                let mut dimensions = data.dimensions;
+                let mut element_type = data.element_type;
+                while let TypeData::Array(array) = type_finder.find(element_type)?.parse()? {
+                    dimensions.extend(array.dimensions);
+                    element_type = array.element_type;
+                }
+
+                let element_type_size = type_size(type_finder, element_type)?;
+                if element_type_size == 0 {
+                    tracing::warn!(
+                        ?type_index,
+                        "element type has size 0, dimensions may be incorrect"
+                    );
+                }
+
+                let mut divider = element_type_size.max(1); // prevent division by zero
+
+                let dims = dimensions
+                    .into_iter()
+                    .rev()
+                    .map(|dim_size| {
+                        let dim_size = dim_size as u64;
+                        let result = dim_size / divider;
+                        divider = dim_size;
+                        result
+                    })
+                    .collect::<Vec<_>>();
+
+                Self::Array(ArrayRef {
+                    subtype: Box::new(Self::new(type_finder, element_type)?),
+                    dims: dims.into_iter().rev().collect(),
+                })
+            }
 
             TypeData::Pointer(data) => Self::Pointer(PointerRef {
                 subtype: Box::new(Self::new(type_finder, data.underlying_type)?),
+                size: match data.attributes.pointer_kind() {
+                    PointerKind::Near16 | PointerKind::Far16 | PointerKind::Huge16 => 2,
+
+                    PointerKind::Near32
+                    | PointerKind::Far32
+                    | PointerKind::BaseSeg
+                    | PointerKind::BaseVal
+                    | PointerKind::BaseSegVal
+                    | PointerKind::BaseAddr
+                    | PointerKind::BaseSegAddr
+                    | PointerKind::BaseType
+                    | PointerKind::BaseSelf => 4,
+
+                    PointerKind::Ptr64 => 8,
+                },
             }),
 
             TypeData::Bitfield(data) => Self::Bitfield(BitfieldRef {

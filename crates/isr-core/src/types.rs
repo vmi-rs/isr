@@ -153,6 +153,20 @@ pub enum BaseRef {
     F128,
 }
 
+impl BaseRef {
+    /// Returns the size of the base type in bytes.
+    pub fn size(&self) -> u64 {
+        match self {
+            BaseRef::Void => 0,
+            BaseRef::Bool | BaseRef::Char | BaseRef::I8 | BaseRef::U8 | BaseRef::F8 => 1,
+            BaseRef::Wchar | BaseRef::I16 | BaseRef::U16 | BaseRef::F16 => 2,
+            BaseRef::I32 | BaseRef::U32 | BaseRef::F32 => 4,
+            BaseRef::I64 | BaseRef::U64 | BaseRef::F64 => 8,
+            BaseRef::I128 | BaseRef::U128 | BaseRef::F128 => 16,
+        }
+    }
+}
+
 /// Enum reference.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnumRef<'a> {
@@ -178,9 +192,6 @@ pub struct ArrayRef<'a> {
 
     /// Array dimensions.
     pub dims: Vec<u64>,
-
-    /// Total number of elements.
-    pub size: u64,
 }
 
 /// Bitfield reference.
@@ -203,4 +214,7 @@ pub struct PointerRef<'a> {
     /// Type of the pointed value.
     #[serde(borrow)]
     pub subtype: Box<Type<'a>>,
+
+    /// Size of the pointer in bytes.
+    pub size: u64,
 }

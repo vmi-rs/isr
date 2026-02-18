@@ -404,9 +404,13 @@ impl<'data> DwarfType<'data> for Type<'data> {
 
             gimli::DW_TAG_array_type => Self::Array(__type_from_array_type(unit, type_)?),
 
-            gimli::DW_TAG_pointer_type => Self::Pointer(PointerRef {
-                subtype: Box::new(Self::new(unit, node)?),
-            }),
+            gimli::DW_TAG_pointer_type => {
+                let size = node.entry().byte_size()?.unwrap_or(0);
+                Self::Pointer(PointerRef {
+                    subtype: Box::new(Self::new(unit, node)?),
+                    size,
+                })
+            }
 
             gimli::DW_TAG_subroutine_type => Self::Function,
 
@@ -527,7 +531,7 @@ fn __type_from_array_type<'data>(
     let node = type_.root()?;
     debug_assert_eq!(node.entry().tag(), gimli::DW_TAG_array_type);
 
-    let mut dimensions = Vec::<Option<u64>>::new();
+    let mut dims = Vec::new();
     let mut children = node.children();
 
     // Parse array dimensions.
@@ -546,18 +550,15 @@ fn __type_from_array_type<'data>(
                 .map(|upper_bound| upper_bound + 1),
         };
 
-        dimensions.push(count);
+        dims.push(count.unwrap_or(0));
     }
-
-    let count = dimensions.first().copied().flatten().unwrap_or(0);
 
     // Parse the type again, since the node.children() iterator consumed the node.
     let node = type_.root()?;
 
     Ok(ArrayRef {
         subtype: Box::new(Type::new(unit, node)?),
-        dims: dimensions.into_iter().map(|dim| dim.unwrap_or(0)).collect(),
-        size: count,
+        dims,
     })
 }
 
