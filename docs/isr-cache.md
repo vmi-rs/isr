@@ -1,3 +1,4 @@
+<!-- readme start -->
 # Opinionated cache for OS kernel profiles
 
 This crate provides a caching mechanism for profiles generated and used by
@@ -61,7 +62,7 @@ let profile = entry.profile()?;
 
 Consult the [`vmi`] crate for more information on how to download debug
 symbols for introspected VMs.
-
+<!-- readme end -->
 
 [`isr`]: https://docs.rs/isr/latest/isr/index.html
 [`vmi`]: https://docs.rs/vmi/latest/vmi/index.html

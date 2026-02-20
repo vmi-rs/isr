@@ -3,6 +3,7 @@
 [![Docs](https://docs.rs/isr/badge.svg)](https://docs.rs/isr/latest/isr/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/vmi-rs/isr/blob/master/LICENSE)
 
+<!-- readme start -->
 # Intermediate Symbol Representation
 
 The `isr` crate provides a unified, version-agnostic way to access and
@@ -97,4 +98,4 @@ frameworks. ISR is specifically designed for the [`vmi`] crate.
 # License
 
 This project is licensed under the MIT license.
-
+<!-- readme end -->
