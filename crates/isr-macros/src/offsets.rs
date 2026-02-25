@@ -81,6 +81,12 @@ impl Bitfield {
     /// This method performs bitwise operations to isolate and return the
     /// value represented by the bitfield within the provided integer.
     pub fn extract(&self, value: u64) -> u64 {
+        assert!(self.bit_length <= 64, "bit length cannot exceed 64 bits");
+        assert!(
+            self.bit_position + self.bit_length <= self.size * 8,
+            "bitfield exceeds field size"
+        );
+
         let result = value >> self.bit_position;
         let result = result & ((1 << self.bit_length) - 1);
 
@@ -148,7 +154,27 @@ impl TryFrom<FieldDescriptor> for Bitfield {
 
     fn try_from(value: FieldDescriptor) -> Result<Self, Self::Error> {
         match value {
-            FieldDescriptor::Field(_) => Err(Error::Conversion("expected bitfield, found field")),
+            // Allow converting a regular field to a bitfield with
+            // bit position 0 and bit length equal to the field size in bits.
+            FieldDescriptor::Field(field) => {
+                if field.size == 0 {
+                    return Err(Error::Conversion(
+                        "cannot convert zero-sized field to bitfield",
+                    ));
+                }
+
+                if field.size > 8 {
+                    return Err(Error::Conversion(
+                        "cannot convert field larger than 8 bytes to bitfield",
+                    ));
+                }
+
+                Ok(Bitfield {
+                    field,
+                    bit_position: 0,
+                    bit_length: field.size * 8,
+                })
+            }
             FieldDescriptor::Bitfield(bitfield) => Ok(bitfield),
         }
     }
