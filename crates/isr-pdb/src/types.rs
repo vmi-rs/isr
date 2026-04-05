@@ -41,6 +41,7 @@ fn type_size(type_finder: &TypeFinder, type_index: TypeIndex) -> Result<u64, Err
                 | PrimitiveKind::Short
                 | PrimitiveKind::U16
                 | PrimitiveKind::UShort
+                | PrimitiveKind::F16
                 | PrimitiveKind::Bool16 => 2,
 
                 PrimitiveKind::RChar32
@@ -49,6 +50,8 @@ fn type_size(type_finder: &TypeFinder, type_index: TypeIndex) -> Result<u64, Err
                 | PrimitiveKind::U32
                 | PrimitiveKind::ULong
                 | PrimitiveKind::F32
+                | PrimitiveKind::F32PP
+                | PrimitiveKind::HRESULT
                 | PrimitiveKind::Bool32 => 4,
 
                 PrimitiveKind::I64
@@ -57,6 +60,13 @@ fn type_size(type_finder: &TypeFinder, type_index: TypeIndex) -> Result<u64, Err
                 | PrimitiveKind::UQuad
                 | PrimitiveKind::F64
                 | PrimitiveKind::Bool64 => 8,
+
+                PrimitiveKind::I128
+                | PrimitiveKind::U128
+                | PrimitiveKind::Octa
+                | PrimitiveKind::UOcta
+                | PrimitiveKind::F80
+                | PrimitiveKind::F128 => 16,
 
                 _ => 0,
             };
@@ -525,14 +535,15 @@ impl<'p> PdbType<'p> for Type<'p> {
 
 fn from_primitive_kind<'p>(kind: PrimitiveKind) -> Type<'p> {
     Type::Base(match kind {
-        PrimitiveKind::Void => BaseRef::Void,
+        PrimitiveKind::NoType | PrimitiveKind::Void => BaseRef::Void,
 
-        PrimitiveKind::Bool8 => BaseRef::Bool,
+        PrimitiveKind::Bool8 | PrimitiveKind::Bool16 | PrimitiveKind::Bool32
+        | PrimitiveKind::Bool64 => BaseRef::Bool,
 
-        PrimitiveKind::RChar => BaseRef::Char,
-        PrimitiveKind::Char => BaseRef::Char,
-        PrimitiveKind::UChar => BaseRef::Char,
+        PrimitiveKind::RChar | PrimitiveKind::Char | PrimitiveKind::UChar => BaseRef::Char,
         PrimitiveKind::WChar => BaseRef::Wchar,
+        PrimitiveKind::RChar16 => BaseRef::U16,
+        PrimitiveKind::RChar32 => BaseRef::U32,
 
         PrimitiveKind::I8 => BaseRef::I8,
         PrimitiveKind::U8 => BaseRef::U8,
@@ -542,9 +553,13 @@ fn from_primitive_kind<'p>(kind: PrimitiveKind) -> Type<'p> {
         PrimitiveKind::U32 | PrimitiveKind::ULong => BaseRef::U32,
         PrimitiveKind::I64 | PrimitiveKind::Quad => BaseRef::I64,
         PrimitiveKind::U64 | PrimitiveKind::UQuad => BaseRef::U64,
+        PrimitiveKind::I128 | PrimitiveKind::Octa => BaseRef::I128,
+        PrimitiveKind::U128 | PrimitiveKind::UOcta => BaseRef::U128,
 
-        PrimitiveKind::F32 => BaseRef::F32,
+        PrimitiveKind::F16 => BaseRef::F16,
+        PrimitiveKind::F32 | PrimitiveKind::F32PP => BaseRef::F32,
         PrimitiveKind::F64 => BaseRef::F64,
+        PrimitiveKind::F80 | PrimitiveKind::F128 => BaseRef::F128,
 
         _ => {
             tracing::error!(?kind, "Unhandled primitive");
