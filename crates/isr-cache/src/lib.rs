@@ -204,7 +204,13 @@ where
         match File::create_new(&profile_path) {
             Ok(profile_file) => {
                 let pdb_file = File::open(&pdb_path)?;
-                isr_pdb::create_profile(pdb_file, |profile| C::encode(profile_file, profile))?;
+                if let Err(err) =
+                    isr_pdb::create_profile(pdb_file, |profile| C::encode(profile_file, profile))
+                {
+                    // Remove the empty/partial file so we retry next time.
+                    let _ = std::fs::remove_file(&profile_path);
+                    return Err(err.into());
+                }
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 tracing::info!(?profile_path, "profile already exists");
@@ -253,9 +259,14 @@ where
             Ok(profile_file) => {
                 let kernel_file = File::open(destination_path.join("vmlinux-dbgsym"))?;
                 let systemmap_file = File::open(destination_path.join("System.map"))?;
-                isr_dwarf::create_profile(kernel_file, systemmap_file, |profile| {
-                    C::encode(profile_file, profile)
-                })?;
+                if let Err(err) =
+                    isr_dwarf::create_profile(kernel_file, systemmap_file, |profile| {
+                        C::encode(profile_file, profile)
+                    })
+                {
+                    let _ = std::fs::remove_file(&profile_path);
+                    return Err(err.into());
+                }
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 tracing::info!(?profile_path, "profile already exists");
