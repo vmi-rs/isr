@@ -9,6 +9,9 @@ pub enum Error {
     #[error(transparent)]
     CodeView(#[from] crate::codeview::Error),
 
-    #[error("Failed to download PDB")]
+    #[error(transparent)]
+    PeInfo(#[from] crate::pe_info::Error),
+
+    #[error("Failed to download")]
     Failed,
 }

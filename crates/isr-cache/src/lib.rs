@@ -85,7 +85,7 @@ pub use isr_core::Profile;
 pub use isr_dl_linux::{
     LinuxBanner, LinuxVersionSignature, UbuntuDownloader, UbuntuVersionSignature,
 };
-pub use isr_dl_pdb::{CodeView, PdbDownloader};
+pub use isr_dl_pdb::{CodeView, PdbDownloader, PeDownloader, PeInfo};
 use memmap2::Mmap;
 
 pub use self::{
@@ -230,6 +230,39 @@ where
     #[cfg(feature = "pdb")]
     pub fn entry_from_pe(&self, path: impl AsRef<Path>) -> Result<Entry<C>, Error> {
         self.entry_from_codeview(CodeView::from_path(path).map_err(isr_dl_pdb::Error::from)?)
+    }
+
+    /// Downloads or retrieves a cached PE binary from its [`PeInfo`].
+    ///
+    /// PE binaries are cached at:
+    /// `<cache>/windows/<name>/<timestamp><size_of_image>/<name>`
+    ///
+    /// Returns the path to the cached binary.
+    #[cfg(feature = "pdb")]
+    pub fn binary_from_pe_info(&self, pe_info: PeInfo) -> Result<PathBuf, Error> {
+        let index = pe_info.index();
+
+        // <cache>/windows/win32u.dll/2B29274223000
+        let destination = self
+            .directory
+            .join("windows")
+            .join(&pe_info.name)
+            .join(&index);
+
+        std::fs::create_dir_all(&destination)?;
+
+        // <cache>/windows/win32u.dll/2B29274223000/win32u.dll
+        let binary_path = destination.join(&pe_info.name);
+        if !binary_path.exists() {
+            PeDownloader::new(pe_info)
+                .with_output(&binary_path)
+                .download()?;
+        }
+        else {
+            tracing::info!(?binary_path, "PE binary already cached");
+        }
+
+        Ok(binary_path)
     }
 
     /// Creates or retrieves a cached profile based on a Linux kernel banner.
