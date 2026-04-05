@@ -189,7 +189,16 @@ impl<'p> PdbTypes<'p> for Types<'p> {
             // keep building the index
             type_finder.update(&type_iter);
 
-            match typ.parse()? {
+            let type_data = match typ.parse() {
+                Ok(data) => data,
+                Err(Error::UnimplementedTypeKind(kind)) => {
+                    tracing::debug!(kind, "skipping unimplemented type kind");
+                    continue;
+                }
+                Err(err) => return Err(err),
+            };
+
+            match type_data {
                 TypeData::Enumeration(enumeration)
                     if !enumeration.properties.forward_reference() =>
                 {
