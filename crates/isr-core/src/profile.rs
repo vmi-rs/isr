@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 
 use crate::{
     symbols::Symbols,
@@ -25,6 +25,56 @@ pub struct Profile<'a> {
     types: Types<'a>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ProfileSymbols<'a> {
+    /// Target architecture.
+    #[serde(borrow)]
+    architecture: Cow<'a, str>,
+
+    /// Symbols.
+    #[serde(borrow)]
+    symbols: Symbols<'a>,
+
+    /// Types.
+    #[expect(unused)]
+    types: IgnoredAny,
+}
+
+impl<'a> From<ProfileSymbols<'a>> for Profile<'a> {
+    fn from(profile: ProfileSymbols<'a>) -> Self {
+        Self {
+            architecture: profile.architecture,
+            symbols: profile.symbols,
+            types: Types::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileTypes<'a> {
+    /// Target architecture.
+    #[serde(borrow)]
+    architecture: Cow<'a, str>,
+
+    /// Symbols.
+    #[expect(unused)]
+    symbols: IgnoredAny,
+
+    /// Types.
+    #[serde(borrow)]
+    types: Types<'a>,
+}
+
+impl<'a> From<ProfileTypes<'a>> for Profile<'a> {
+    fn from(profile: ProfileTypes<'a>) -> Self {
+        Self {
+            architecture: profile.architecture,
+            symbols: Symbols::default(),
+            types: profile.types,
+        }
+    }
+}
+
 impl<'a> Profile<'a> {
     /// Creates a new profile.
     pub fn new(architecture: Cow<'a, str>, symbols: Symbols<'a>, types: Types<'a>) -> Self {
@@ -41,6 +91,15 @@ impl<'a> Profile<'a> {
             .0
             .iter()
             .map(|(name, value)| (name.as_ref(), value))
+    }
+
+    /// Consumes the profile and returns the symbols as owned pairs.
+    ///
+    /// The returned `Cow` strings preserve their original lifetime,
+    /// allowing callers to extract borrowed references to the
+    /// underlying data without cloning.
+    pub fn into_symbols(self) -> impl IntoIterator<Item = (Cow<'a, str>, u64)> {
+        self.symbols.0
     }
 
     /// Returns the types.

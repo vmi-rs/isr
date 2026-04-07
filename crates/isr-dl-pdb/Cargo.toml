@@ -15,6 +15,7 @@ keywords = [
 ]
 
 [dependencies]
+bon = { workspace = true }
 object = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 thiserror = { workspace = true }

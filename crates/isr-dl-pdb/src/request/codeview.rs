@@ -1,37 +1,21 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use object::{
     FileKind, Object,
     read::pe::{ImageNtHeaders, PeFile, PeFile32, PeFile64},
 };
 
-/// CodeView information extracted from a PDB file.
-#[derive(Debug, Clone)]
+use super::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CodeView {
-    /// Path to the PDB file.
-    pub path: String,
-
-    /// PDB GUID.
+    pub name: String,
     pub guid: String,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-
-    #[error(transparent)]
-    Object(#[from] object::Error),
-
-    #[error("Unsupported architecture {0:?}")]
-    UnsupportedArchitecture(object::FileKind),
-
-    #[error("CodeView not found")]
-    NotFound,
+    pub age: u32,
 }
 
 impl CodeView {
-    pub fn from_pe<Pe>(pe: &PeFile<Pe>) -> Result<CodeView, Error>
+    pub fn from_pe<Pe>(pe: &PeFile<Pe>) -> Result<Self, Error>
     where
         Pe: ImageNtHeaders,
     {
@@ -49,10 +33,10 @@ impl CodeView {
         let guid2 = u16::from_le_bytes(guid[6..8].try_into().unwrap());
         let guid3 = &guid[8..16];
 
-        Ok(CodeView {
-            path: String::from_utf8_lossy(path).to_string(),
+        Ok(Self {
+            name: String::from_utf8_lossy(path).to_string(),
             guid: format!(
-                "{:08x}{:04x}{:04x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:01x}",
+                "{:08x}{:04x}{:04x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
                 guid0,
                 guid1,
                 guid2,
@@ -64,12 +48,12 @@ impl CodeView {
                 guid3[5],
                 guid3[6],
                 guid3[7],
-                age & 0xf,
             ),
+            age: age & 0xf,
         })
     }
 
-    pub fn from_path(path: impl AsRef<Path>) -> Result<CodeView, Error> {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
         let data = std::fs::read(path)?;
 
         match FileKind::parse(&data[..])? {
@@ -77,5 +61,13 @@ impl CodeView {
             FileKind::Pe64 => Self::from_pe(&PeFile64::parse(&data[..])?),
             kind => Err(Error::UnsupportedArchitecture(kind)),
         }
+    }
+
+    pub fn hash(&self) -> String {
+        format!("{}{:x}", self.guid, self.age)
+    }
+
+    pub fn subdirectory(&self) -> PathBuf {
+        PathBuf::from(&self.name).join(self.hash())
     }
 }

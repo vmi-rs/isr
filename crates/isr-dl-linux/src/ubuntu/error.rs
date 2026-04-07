@@ -15,9 +15,6 @@ pub enum Error {
     #[error("deb entry not found")]
     DebEntryNotFound,
 
-    #[error("Invalid banner")]
-    InvalidBanner,
-
     #[error("URL does not contain filename")]
     UrlDoesNotContainFilename,
 

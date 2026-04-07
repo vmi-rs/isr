@@ -1,13 +1,23 @@
-use std::sync::LazyLock;
+use std::{path::PathBuf, sync::LazyLock};
 
 use regex::Regex;
 
-#[derive(Debug)]
+use super::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LinuxVersionSignature {
     Ubuntu(UbuntuVersionSignature),
 }
 
-#[derive(Debug)]
+impl LinuxVersionSignature {
+    pub fn subdirectory(&self) -> PathBuf {
+        match self {
+            Self::Ubuntu(signature) => signature.subdirectory(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UbuntuVersionSignature {
     pub release: String,
     pub revision: String,
@@ -15,8 +25,33 @@ pub struct UbuntuVersionSignature {
     pub mainline_kernel_version: String,
 }
 
+impl UbuntuVersionSignature {
+    pub fn subdirectory(&self) -> PathBuf {
+        //
+        // Build the Ubuntu kernel package name and version string.
+        // Example:
+        //     Ubuntu {
+        //         release: "6.8.0",
+        //         revision: "40.40~22.04.3",
+        //         kernel_flavour: "generic",
+        //         mainline_kernel_version: "6.8.12",
+        //     }
+        //
+        // ... results in:
+        //     release: "6.8.0-40-generic"
+        //     version: "6.8.0-40.40~22.04.3"
+        //
+        // See https://ubuntu.com/kernel for more information.
+
+        PathBuf::from(format!(
+            "{}-{}-{}",
+            self.release, self.revision, self.kernel_flavour
+        ))
+    }
+}
+
 /// Linux banner.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LinuxBanner {
     pub uts_release: String,
     pub linux_compile_by: String,
@@ -28,8 +63,10 @@ pub struct LinuxBanner {
 
 // root/debian/rules.d/2-binary-arch.mk (ubuntu CONFIG_VERSION_SIGNATURE)
 
-impl LinuxBanner {
-    pub fn parse(banner: &str) -> Option<Self> {
+impl std::str::FromStr for LinuxBanner {
+    type Err = Error;
+
+    fn from_str(banner: &str) -> Result<Self, Self::Err> {
         //
         // Linux version 6.8.0-40-generic
         // (buildd@lcy02-amd64-078)
@@ -47,10 +84,13 @@ impl LinuxBanner {
             .unwrap()
         });
 
-        let captures = LINUX_VERSION_REGEX.captures(banner)?;
+        let captures = LINUX_VERSION_REGEX
+            .captures(banner)
+            .ok_or(Error::InvalidBanner)?;
+
         let version_signature = try_parse_ubuntu_signature(&captures["UTS_VERSION"]);
 
-        Some(Self {
+        Ok(Self {
             uts_release: captures["UTS_RELEASE"].to_string(),
             linux_compile_by: captures["LINUX_COMPILE_BY"].to_string(),
             linux_compile_host: captures["LINUX_COMPILE_HOST"].to_string(),

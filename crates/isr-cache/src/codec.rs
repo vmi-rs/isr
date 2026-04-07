@@ -1,6 +1,7 @@
 use std::io::Write;
 
-use isr_core::Profile;
+use isr_core::{Profile, ProfileSymbols, ProfileTypes};
+use serde::Deserialize;
 
 /// A codec for encoding and decoding profiles.
 pub trait Codec {
@@ -16,8 +17,24 @@ pub trait Codec {
     /// Encodes a profile into the given writer.
     fn encode(writer: impl Write, profile: &Profile) -> Result<(), Self::EncodeError>;
 
-    /// Decodes a profile from the given slice.
-    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError>;
+    /// Decodes a value from the given slice, borrowing strings directly
+    /// from the input data when possible.
+    fn decode<'a, T: Deserialize<'a>>(slice: &'a [u8]) -> Result<T, Self::DecodeError>;
+
+    /// Decodes a full profile from the given slice.
+    fn decode_profile(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
+        Self::decode(slice)
+    }
+
+    /// Decodes only the symbols from a profile, skipping types.
+    fn decode_symbols(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
+        Self::decode::<ProfileSymbols<'_>>(slice).map(Into::into)
+    }
+
+    /// Decodes only the types from a profile, skipping symbols.
+    fn decode_types(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
+        Self::decode::<ProfileTypes<'_>>(slice).map(Into::into)
+    }
 }
 
 /// A codec for the bincode format.
@@ -38,8 +55,8 @@ impl Codec for BincodeCodec {
         Ok(())
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
-        let (result, _bytes_read) =
+    fn decode<'a, T: Deserialize<'a>>(slice: &'a [u8]) -> Result<T, Self::DecodeError> {
+        let (result, _) =
             bincode::serde::borrow_decode_from_slice(slice, bincode::config::standard())?;
         Ok(result)
     }
@@ -62,7 +79,7 @@ impl Codec for JsonCodec {
         serde_json::to_writer_pretty(writer, profile)
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
+    fn decode<'a, T: Deserialize<'a>>(slice: &'a [u8]) -> Result<T, Self::DecodeError> {
         serde_json::from_slice(slice)
     }
 }
@@ -84,7 +101,7 @@ impl Codec for MsgpackCodec {
         rmp_serde::encode::write(&mut writer, profile)
     }
 
-    fn decode(slice: &[u8]) -> Result<Profile<'_>, Self::DecodeError> {
+    fn decode<'a, T: Deserialize<'a>>(slice: &'a [u8]) -> Result<T, Self::DecodeError> {
         rmp_serde::from_slice(slice)
     }
 }

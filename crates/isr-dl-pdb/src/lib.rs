@@ -1,158 +1,125 @@
 //! Download PDB files and PE binaries from Microsoft symbol servers.
 
-mod codeview;
 mod error;
-mod pe_info;
+mod request;
 
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
+use std::{fs::File, path::PathBuf};
+
+use bon::Builder;
+use reqwest::blocking::Response;
+
+pub use self::{
+    error::Error,
+    request::{CodeView, ImageSignature, SymbolKind},
 };
-
-pub use self::{codeview::CodeView, error::Error, pe_info::PeInfo};
 
 pub const DEFAULT_SERVER_URL: &str = "http://msdl.microsoft.com/download/symbols";
 
-pub struct PdbDownloader {
-    codeview: CodeView,
-    servers: Vec<String>,
-    output: Option<PathBuf>,
+#[derive(Builder)]
+pub struct SymbolRequest {
+    #[builder(start_fn, into)]
+    kind: SymbolKind,
+
+    #[builder(default = false)]
+    skip_existing: bool,
 }
 
-impl PdbDownloader {
-    pub fn new(codeview: CodeView) -> Self {
-        Self {
-            codeview,
-            servers: vec![DEFAULT_SERVER_URL.into()],
-            output: None,
+impl SymbolRequest {
+    pub fn name(&self) -> &str {
+        self.kind.name()
+    }
+
+    pub fn hash(&self) -> String {
+        self.kind.hash()
+    }
+
+    pub fn subdirectory(&self) -> PathBuf {
+        self.kind.subdirectory()
+    }
+}
+
+#[derive(Builder)]
+pub struct SymbolDownloader {
+    #[builder(default)]
+    client: reqwest::blocking::Client,
+    #[builder(
+        default = vec![DEFAULT_SERVER_URL.into()],
+        with = |iter: impl IntoIterator<Item = impl Into<String>>| {
+            iter.into_iter().map(Into::into).collect()
         }
-    }
+    )]
+    servers: Vec<String>,
+    output_directory: PathBuf,
+}
 
-    pub fn from_exe(path: impl AsRef<Path>) -> Result<Self, Error> {
-        Ok(Self::new(CodeView::from_path(path)?))
-    }
-
-    pub fn with_servers(self, servers: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            servers: servers.into_iter().map(Into::into).collect(),
-            ..self
-        }
-    }
-
-    pub fn with_output(self, output: impl Into<PathBuf>) -> Self {
-        Self {
-            output: Some(output.into()),
-            ..self
-        }
-    }
-
-    pub fn download(self) -> Result<PathBuf, Error> {
-        let CodeView { path, guid } = self.codeview;
+impl SymbolDownloader {
+    pub fn download(&self, request: SymbolRequest) -> Result<PathBuf, Error> {
+        let output_directory = self.output_directory.join(request.subdirectory());
+        std::fs::create_dir_all(&output_directory)?;
 
         for server in &self.servers {
-            let path_with_underscore = path.chars().rev().skip(1).collect::<String>() + "_";
-
-            for suffix in &[&path, &path_with_underscore] {
-                let url = format!("{server}/{path}/{guid}/{suffix}");
-
-                tracing::info!(url, "requesting");
-                let response = reqwest::blocking::get(&url);
-                if response.is_err() {
-                    continue;
-                }
-
-                let output = match &self.output {
-                    Some(output) => {
-                        if output.is_dir() {
-                            output.join(format!("{guid}_{path}"))
-                        }
-                        else {
-                            output.clone()
-                        }
-                    }
-                    None => PathBuf::from(format!("{guid}_{path}")),
-                };
-
-                tracing::info!(?output, "downloading");
-                let mut file = File::create(&output)?;
-                response?.copy_to(&mut file)?;
-                return Ok(output);
+            if let Ok(path) = self.try_server(server, &request) {
+                return Ok(path);
             }
         }
 
         Err(Error::Failed)
     }
-}
 
-/// Downloads PE binaries (DLLs/EXEs) from symbol servers.
-///
-/// PE binaries are indexed by `{TimeDateStamp}{SizeOfImage}`, unlike
-/// PDBs which use `{GUID}{age}`.
-pub struct PeDownloader {
-    pe_info: PeInfo,
-    servers: Vec<String>,
-    output: Option<PathBuf>,
-}
-
-impl PeDownloader {
-    pub fn new(pe_info: PeInfo) -> Self {
-        Self {
-            pe_info,
-            servers: vec![DEFAULT_SERVER_URL.into()],
-            output: None,
+    fn try_server(&self, server: &str, request: &SymbolRequest) -> Result<PathBuf, Error> {
+        match self.try_uncompressed(server, request) {
+            Ok(path) => Ok(path),
+            Err(_) => self.try_compressed(server, request),
         }
     }
 
-    pub fn with_servers(self, servers: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            servers: servers.into_iter().map(Into::into).collect(),
-            ..self
-        }
-    }
+    fn try_uncompressed(&self, server: &str, request: &SymbolRequest) -> Result<PathBuf, Error> {
+        let name = request.name();
+        let hash = request.hash();
 
-    pub fn with_output(self, output: impl Into<PathBuf>) -> Self {
-        Self {
-            output: Some(output.into()),
-            ..self
-        }
-    }
+        let output = self
+            .output_directory
+            .join(request.subdirectory())
+            .join(name);
 
-    pub fn download(self) -> Result<PathBuf, Error> {
-        let PeInfo {
-            name,
-            timestamp,
-            size_of_image,
-        } = self.pe_info;
-
-        let index = format!("{timestamp}{size_of_image}");
-
-        for server in &self.servers {
-            let url = format!("{server}/{name}/{index}/{name}");
-
-            tracing::info!(url, "requesting PE binary");
-            let mut response = match reqwest::blocking::get(&url) {
-                Ok(response) if response.status().is_success() => response,
-                _ => continue,
-            };
-
-            let output = match &self.output {
-                Some(output) => {
-                    if output.is_dir() {
-                        output.join(&name)
-                    }
-                    else {
-                        output.clone()
-                    }
-                }
-                None => PathBuf::from(&name),
-            };
-
-            tracing::info!(?output, "downloading PE binary");
-            let mut file = File::create(&output)?;
-            response.copy_to(&mut file)?;
+        if output.exists() && request.skip_existing {
+            tracing::debug!(path = %output.display(), "skipping download");
             return Ok(output);
         }
 
-        Err(Error::Failed)
+        let url = format!("{server}/{name}/{hash}/{name}");
+        let mut response = self.fetch(&url)?;
+
+        let mut file = File::create(&output)?;
+        response.copy_to(&mut file)?;
+        Ok(output)
+    }
+
+    fn try_compressed(&self, server: &str, request: &SymbolRequest) -> Result<PathBuf, Error> {
+        let name = request.name();
+        let hash = request.hash();
+        let compressed_name = name.chars().rev().skip(1).collect::<String>() + "_";
+
+        let output = self
+            .output_directory
+            .join(request.subdirectory())
+            .join(&compressed_name);
+
+        if output.exists() && request.skip_existing {
+            tracing::debug!(path = %output.display(), "skipping download");
+            return Ok(output);
+        }
+
+        let url = format!("{server}/{name}/{hash}/{compressed_name}");
+        let mut response = self.fetch(&url)?;
+
+        let mut file = File::create(&output)?;
+        response.copy_to(&mut file)?;
+        Ok(output)
+    }
+
+    fn fetch(&self, url: &str) -> Result<Response, Error> {
+        tracing::debug!(url, "requesting symbol");
+        Ok(self.client.get(url).send()?.error_for_status()?)
     }
 }

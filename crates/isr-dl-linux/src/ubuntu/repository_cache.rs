@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use reqwest::blocking::Client;
 use url::Url;
 
 use super::{
@@ -13,7 +14,8 @@ pub struct UbuntuPackageCache {
 
 impl UbuntuPackageCache {
     pub fn fetch(
-        host: Url,
+        client: &Client,
+        host: &Url,
         arch: &str,
         dists: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Result<Self, Error> {
@@ -22,7 +24,7 @@ impl UbuntuPackageCache {
         for dist in dists {
             let dist = dist.as_ref();
 
-            let repository = repository::fetch(host.clone(), arch, dist)?;
+            let repository = repository::fetch(client, host, arch, dist)?;
             let packages = packages.entry(dist.to_owned()).or_default();
 
             for entry in repository {
@@ -36,7 +38,10 @@ impl UbuntuPackageCache {
             }
         }
 
-        Ok(Self { host, packages })
+        Ok(Self {
+            host: host.clone(),
+            packages,
+        })
     }
 
     pub fn find_package(
@@ -44,8 +49,8 @@ impl UbuntuPackageCache {
         package: &str,
         version: &str,
     ) -> Result<Option<&UbuntuRepositoryEntry>, Error> {
-        tracing::info!(package, version, "finding package");
-        self.find(package, version, false)
+        tracing::debug!(package, version, "finding package");
+        self.find_package_inner(package, version, false)
     }
 
     pub fn find_dbgsym_package(
@@ -53,8 +58,8 @@ impl UbuntuPackageCache {
         package: &str,
         version: &str,
     ) -> Result<Option<&UbuntuRepositoryEntry>, Error> {
-        tracing::info!(package, version, "finding dbgsym package");
-        self.find(package, version, true)
+        tracing::debug!(package, version, "finding dbgsym package");
+        self.find_package_inner(package, version, true)
     }
 
     pub fn package_url(&self, entry: &UbuntuRepositoryEntry) -> Result<Url, Error> {
@@ -64,7 +69,7 @@ impl UbuntuPackageCache {
         }
     }
 
-    fn find(
+    fn find_package_inner(
         &self,
         package: &str,
         version: &str,

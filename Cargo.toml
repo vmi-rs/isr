@@ -17,6 +17,7 @@ repository = "https://github.com/vmi-rs/isr"
 
 [workspace.dependencies]
 bincode = "2"
+bon = "3"
 debpkg = "0.6"
 flate2 = "1.1"
 gimli = "0.33"

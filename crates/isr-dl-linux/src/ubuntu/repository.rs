@@ -1,6 +1,7 @@
 use std::io::Read as _;
 
 use flate2::read::GzDecoder;
+use reqwest::blocking::Client;
 use url::Url;
 
 pub use super::error::Error;
@@ -24,12 +25,17 @@ pub struct UbuntuRepositoryEntry {
     pub sha512: Option<String>,
 }
 
-pub fn fetch(host: Url, arch: &str, dist: &str) -> Result<Vec<UbuntuRepositoryEntry>, Error> {
+pub fn fetch(
+    client: &Client,
+    host: &Url,
+    arch: &str,
+    dist: &str,
+) -> Result<Vec<UbuntuRepositoryEntry>, Error> {
     let mut result = Vec::new();
     let full_url = host.join(&format!("dists/{dist}/main/binary-{arch}/Packages.gz"))?;
 
     tracing::info!(url = %full_url, "requesting");
-    let response = reqwest::blocking::get(full_url)?.error_for_status()?;
+    let response = client.get(full_url).send()?.error_for_status()?;
 
     let data = response.bytes()?;
     let mut decoder = GzDecoder::new(&data[..]);

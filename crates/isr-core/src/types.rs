@@ -9,9 +9,9 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Types<'a> {
-    #[serde(borrow)]
+    #[serde(borrow, with = "crate::serde_cow_map")]
     pub enums: IndexMap<Cow<'a, str>, Enum<'a>>,
-    #[serde(borrow)]
+    #[serde(borrow, with = "crate::serde_cow_map")]
     pub structs: IndexMap<Cow<'a, str>, Struct<'a>>,
 }
 
@@ -24,7 +24,7 @@ pub struct Types<'a> {
 pub struct Enum<'a> {
     #[serde(borrow)]
     pub subtype: Type<'a>,
-    #[serde(borrow)]
+    #[serde(borrow, with = "crate::serde_cow_map")]
     pub fields: IndexMap<Cow<'a, str>, Variant>,
 }
 
@@ -53,7 +53,7 @@ pub enum Variant {
 pub struct Struct<'a> {
     pub kind: StructKind,
     pub size: u64,
-    #[serde(borrow)]
+    #[serde(borrow, with = "crate::serde_cow_map")]
     pub fields: IndexMap<Cow<'a, str>, Field<'a>>,
 }
 

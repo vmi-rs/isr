@@ -76,22 +76,30 @@
 mod codec;
 mod error;
 
+#[cfg(feature = "pdb")]
+use std::cell::OnceCell;
 use std::{
     fs::File,
     path::{Path, PathBuf},
 };
 
 pub use isr_core::Profile;
+#[cfg(feature = "linux")]
 pub use isr_dl_linux::{
-    LinuxBanner, LinuxVersionSignature, UbuntuDownloader, UbuntuVersionSignature,
+    LinuxBanner, LinuxVersionSignature, UbuntuSymbolDownloader, UbuntuSymbolPaths,
+    UbuntuSymbolRequest, UbuntuVersionSignature,
 };
-pub use isr_dl_pdb::{CodeView, PdbDownloader, PeDownloader, PeInfo};
+#[cfg(feature = "pdb")]
+pub use isr_dl_pdb::{CodeView, ImageSignature, SymbolDownloader, SymbolKind, SymbolRequest};
 use memmap2::Mmap;
 
-pub use self::{
-    codec::{BincodeCodec, Codec, JsonCodec, MsgpackCodec},
-    error::Error,
-};
+#[cfg(feature = "codec-bincode")]
+pub use self::codec::BincodeCodec;
+#[cfg(feature = "codec-json")]
+pub use self::codec::JsonCodec;
+#[cfg(feature = "codec-msgpack")]
+pub use self::codec::MsgpackCodec;
+pub use self::{codec::Codec, error::Error};
 
 /// An entry in the [`IsrCache`].
 pub struct Entry<C>
@@ -134,7 +142,17 @@ where
 
     /// Decodes the profile from the entry.
     pub fn profile(&self) -> Result<Profile<'_>, C::DecodeError> {
-        C::decode(&self.data)
+        C::decode_profile(&self.data)
+    }
+
+    /// Decodes the profile from the entry.
+    pub fn profile_symbols(&self) -> Result<Profile<'_>, C::DecodeError> {
+        C::decode_symbols(&self.data)
+    }
+
+    /// Decodes the profile from the entry.
+    pub fn profile_types(&self) -> Result<Profile<'_>, C::DecodeError> {
+        C::decode_types(&self.data)
     }
 }
 
@@ -147,11 +165,17 @@ pub struct IsrCache<C = JsonCodec>
 where
     C: Codec,
 {
+    #[cfg(feature = "linux")]
+    ubuntu_downloader: OnceCell<UbuntuSymbolDownloader>,
+
+    #[cfg(feature = "pdb")]
+    symbol_downloader: OnceCell<SymbolDownloader>,
+
     /// The directory where cached profiles are stored.
-    directory: PathBuf,
+    output_directory: PathBuf,
 
     /// The codec used to encode and decode profiles.
-    _codec: std::marker::PhantomData<C>,
+    _marker: std::marker::PhantomData<C>,
 }
 
 impl<C> IsrCache<C>
@@ -160,14 +184,126 @@ where
 {
     /// Creates a new `IsrCache` instance, initializing it with the provided
     /// directory. If the directory doesn't exist, it attempts to create it.
-    pub fn new(directory: impl Into<PathBuf>) -> Result<Self, Error> {
-        let directory = directory.into();
-        std::fs::create_dir_all(&directory)?;
+    pub fn new(output_directory: impl Into<PathBuf>) -> Result<Self, Error> {
+        let output_directory = output_directory.into();
+        std::fs::create_dir_all(&output_directory)?;
 
         Ok(Self {
-            directory,
-            _codec: std::marker::PhantomData,
+            #[cfg(feature = "linux")]
+            ubuntu_downloader: OnceCell::new(),
+            #[cfg(feature = "pdb")]
+            symbol_downloader: OnceCell::new(),
+
+            output_directory,
+            _marker: std::marker::PhantomData,
         })
+    }
+
+    #[cfg(feature = "linux")]
+    pub fn with_ubuntu_downloader(self, ubuntu_downloader: UbuntuSymbolDownloader) -> Self {
+        Self {
+            ubuntu_downloader: OnceCell::from(ubuntu_downloader),
+            ..self
+        }
+    }
+
+    #[cfg(feature = "linux")]
+    pub fn ubuntu_downloader(&self) -> &UbuntuSymbolDownloader {
+        self.ubuntu_downloader.get_or_init(|| {
+            UbuntuSymbolDownloader::builder()
+                .output_directory(self.output_directory.join("ubuntu"))
+                .build()
+        })
+    }
+
+    #[cfg(feature = "pdb")]
+    pub fn with_symbol_downloader(self, symbol_downloader: SymbolDownloader) -> Self {
+        Self {
+            symbol_downloader: OnceCell::from(symbol_downloader),
+            ..self
+        }
+    }
+
+    #[cfg(feature = "pdb")]
+    pub fn symbol_downloader(&self) -> &SymbolDownloader {
+        self.symbol_downloader.get_or_init(|| {
+            SymbolDownloader::builder()
+                .output_directory(self.output_directory.join("windows"))
+                .build()
+        })
+    }
+
+    /// Creates or retrieves a cached profile based on a Linux kernel banner.
+    ///
+    /// Parses the banner to determine the kernel version and downloads the
+    /// necessary debug symbols and system map if not present in the cache.
+    /// Generates and stores the profile, returning its path.
+    #[cfg(feature = "linux")]
+    pub fn entry_from_linux_banner(&self, linux_banner: &str) -> Result<Entry<C>, Error> {
+        let banner = linux_banner.parse::<LinuxBanner>()?;
+
+        let output_paths = match banner.version_signature {
+            Some(LinuxVersionSignature::Ubuntu(version_signature)) => {
+                self.download_from_ubuntu_version_signature(version_signature)?
+            }
+            _ => return Err(Error::InvalidBanner),
+        };
+
+        let output_directory = output_paths.output_directory;
+
+        let profile_path = output_directory
+            .join("profile")
+            .with_extension(C::EXTENSION);
+
+        match File::create_new(&profile_path) {
+            Ok(profile_file) => {
+                let kernel_file = File::open(output_directory.join("vmlinux-dbgsym"))?;
+                let systemmap_file = File::open(output_directory.join("System.map"))?;
+                isr_dwarf::create_profile(kernel_file, systemmap_file, |profile| {
+                    C::encode(profile_file, profile)
+                })?;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                tracing::debug!(
+                    profile_path = %profile_path.display(),
+                    "profile already exists"
+                );
+            }
+            Err(err) => return Err(err.into()),
+        }
+
+        Entry::new(profile_path)
+    }
+
+    /// Downloads and extracts the required debug symbols from the Ubuntu
+    /// repositories based on the Ubuntu version signature in the Linux banner.
+    ///
+    /// Returns the path to the directory containing the downloaded and
+    /// extracted files.
+    #[cfg(feature = "linux")]
+    pub fn download_from_ubuntu_version_signature(
+        &self,
+        version_signature: UbuntuVersionSignature,
+    ) -> Result<UbuntuSymbolPaths, isr_dl_linux::Error> {
+        let request = UbuntuSymbolRequest::builder()
+            .version_signature(version_signature)
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-image.deb
+            .download_linux_image_as("linux-image.deb")
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/vmlinuz
+            .extract_linux_image_as("vmlinuz")
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-image-dbgsym.deb
+            .download_linux_image_dbgsym_as("linux-image-dbgsym.deb")
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/vmlinux-dbgsym
+            .extract_linux_image_dbgsym_as("vmlinux-dbgsym")
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-modules.deb
+            .download_linux_modules_as("linux-modules.deb")
+            // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/System.map
+            .extract_systemmap_as("System.map")
+            .skip_existing(true)
+            .build();
+
+        let paths = self.ubuntu_downloader().download(request)?;
+        Ok(paths)
     }
 
     /// Creates or retrieves a cached profile from a [`CodeView`] debug
@@ -179,41 +315,30 @@ where
     /// path is returned.
     #[cfg(feature = "pdb")]
     pub fn entry_from_codeview(&self, codeview: CodeView) -> Result<Entry<C>, Error> {
-        let path = Path::new(&codeview.path);
-
         // <cache>/windows/ntkrnlmp.pdb/3844dbb920174967be7aa4a2c20430fa2
-        let destination = self
-            .directory
+        let output_directory = self
+            .output_directory
             .join("windows")
-            .join(path)
-            .join(&codeview.guid);
-
-        std::fs::create_dir_all(&destination)?;
+            .join(codeview.subdirectory());
 
         // <cache>/windows/ntkrnlmp.pdb/3844dbb920174967be7aa4a2c20430fa2/ntkrnlmp.pdb
-        let pdb_path = destination.join(path);
-        if !pdb_path.exists() {
-            PdbDownloader::new(codeview.clone())
-                .with_output(&pdb_path)
-                .download()?;
-        }
+        let pdb_path = self.download_from_codeview(codeview)?;
 
         // <cache>/windows/ntkrnlmp.pdb/3844dbb920174967be7aa4a2c20430fa2/profile<.ext>
-        let profile_path = destination.join("profile").with_extension(C::EXTENSION);
+        let profile_path = output_directory
+            .join("profile")
+            .with_extension(C::EXTENSION);
 
         match File::create_new(&profile_path) {
             Ok(profile_file) => {
                 let pdb_file = File::open(&pdb_path)?;
-                if let Err(err) =
-                    isr_pdb::create_profile(pdb_file, |profile| C::encode(profile_file, profile))
-                {
-                    // Remove the empty/partial file so we retry next time.
-                    let _ = std::fs::remove_file(&profile_path);
-                    return Err(err.into());
-                }
+                isr_pdb::create_profile(pdb_file, |profile| C::encode(profile_file, profile))?;
             }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                tracing::info!(?profile_path, "profile already exists");
+                tracing::debug!(
+                    profile_path = %profile_path.display(),
+                    "profile already exists"
+                );
             }
             Err(err) => return Err(err.into()),
         }
@@ -232,6 +357,16 @@ where
         self.entry_from_codeview(CodeView::from_path(path).map_err(isr_dl_pdb::Error::from)?)
     }
 
+    #[cfg(feature = "pdb")]
+    pub fn download_from_codeview(&self, codeview: CodeView) -> Result<PathBuf, Error> {
+        // <cache>/windows/ntkrnlmp.pdb/3844dbb920174967be7aa4a2c20430fa2/ntkrnlmp.pdb
+        let pdb_path = self
+            .symbol_downloader()
+            .download(SymbolRequest::builder(codeview).skip_existing(true).build())?;
+
+        Ok(pdb_path)
+    }
+
     /// Downloads or retrieves a cached PE binary from its [`PeInfo`].
     ///
     /// PE binaries are cached at:
@@ -239,149 +374,17 @@ where
     ///
     /// Returns the path to the cached binary.
     #[cfg(feature = "pdb")]
-    pub fn binary_from_pe_info(&self, pe_info: PeInfo) -> Result<PathBuf, Error> {
-        let index = pe_info.index();
-
-        // <cache>/windows/win32u.dll/2B29274223000
-        let destination = self
-            .directory
-            .join("windows")
-            .join(&pe_info.name)
-            .join(&index);
-
-        std::fs::create_dir_all(&destination)?;
-
-        // <cache>/windows/win32u.dll/2B29274223000/win32u.dll
-        let binary_path = destination.join(&pe_info.name);
-        if !binary_path.exists() {
-            PeDownloader::new(pe_info)
-                .with_output(&binary_path)
-                .download()?;
-        }
-        else {
-            tracing::info!(?binary_path, "PE binary already cached");
-        }
-
-        Ok(binary_path)
-    }
-
-    /// Creates or retrieves a cached profile based on a Linux kernel banner.
-    ///
-    /// Parses the banner to determine the kernel version and downloads the
-    /// necessary debug symbols and system map if not present in the cache.
-    /// Generates and stores the profile, returning its path.
-    #[cfg(feature = "linux")]
-    pub fn entry_from_linux_banner(&self, linux_banner: &str) -> Result<Entry<C>, Error> {
-        let banner = match LinuxBanner::parse(linux_banner) {
-            Some(banner) => banner,
-            None => return Err(Error::InvalidBanner),
-        };
-
-        let destination_path = match banner.version_signature {
-            Some(LinuxVersionSignature::Ubuntu(version_signature)) => {
-                self.download_from_ubuntu_version_signature(version_signature)?
-            }
-            _ => return Err(Error::InvalidBanner),
-        };
-
-        let profile_path = destination_path
-            .join("profile")
-            .with_extension(C::EXTENSION);
-
-        match File::create_new(&profile_path) {
-            Ok(profile_file) => {
-                let kernel_file = File::open(destination_path.join("vmlinux-dbgsym"))?;
-                let systemmap_file = File::open(destination_path.join("System.map"))?;
-                if let Err(err) =
-                    isr_dwarf::create_profile(kernel_file, systemmap_file, |profile| {
-                        C::encode(profile_file, profile)
-                    })
-                {
-                    let _ = std::fs::remove_file(&profile_path);
-                    return Err(err.into());
-                }
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                tracing::info!(?profile_path, "profile already exists");
-            }
-            Err(err) => return Err(err.into()),
-        }
-
-        Entry::new(profile_path)
-    }
-
-    /// Downloads and extracts the required debug symbols from the Ubuntu
-    /// repositories based on the Ubuntu version signature in the Linux banner.
-    ///
-    /// Returns the path to the directory containing the downloaded and
-    /// extracted files.
-    #[cfg(feature = "linux")]
-    fn download_from_ubuntu_version_signature(
+    pub fn download_from_image_signature(
         &self,
-        version_signature: UbuntuVersionSignature,
-    ) -> Result<PathBuf, isr_dl_linux::Error> {
-        let UbuntuVersionSignature {
-            release,
-            revision,
-            kernel_flavour,
-            ..
-        } = version_signature;
+        image_signature: ImageSignature,
+    ) -> Result<PathBuf, Error> {
+        // <cache>/windows/ntoskrnl.exe/7D02613E1047000/ntoskrnl.exe
+        let image_path = self.symbol_downloader().download(
+            SymbolRequest::builder(image_signature)
+                .skip_existing(true)
+                .build(),
+        )?;
 
-        // <cache>/ubuntu
-        let downloader = UbuntuDownloader::new(&release, &revision, &kernel_flavour)
-            .with_output_directory(self.directory.join("ubuntu"));
-
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic
-        let destination_path = downloader.destination_path();
-
-        // Download only what's necessary.
-
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-image.deb
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/vmlinuz
-        let downloader = match destination_path.join("linux-image.deb").exists() {
-            false => downloader
-                .download_linux_image_as("linux-image.deb")
-                .extract_linux_image_as("vmlinuz"),
-            true => {
-                tracing::info!("linux-image.deb already exists");
-                downloader
-            }
-        };
-
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-image-dbgsym.deb
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/vmlinux-dbgsym
-        let downloader = match destination_path.join("linux-image-dbgsym.deb").exists() {
-            false => downloader
-                .download_linux_image_dbgsym_as("linux-image-dbgsym.deb")
-                .extract_linux_image_dbgsym_as("vmlinux-dbgsym"),
-            true => {
-                tracing::info!("linux-image-dbgsym.deb already exists");
-                downloader
-            }
-        };
-
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/linux-modules.deb
-        // <cache>/ubuntu/6.8.0-40.40~22.04.3-generic/System.map
-        let downloader = match destination_path.join("linux-modules.deb").exists() {
-            false => downloader
-                .download_linux_modules_as("linux-modules.deb")
-                .extract_systemmap_as("System.map"),
-            true => {
-                tracing::info!("linux-modules.deb already exists");
-                downloader
-            }
-        };
-
-        match downloader.skip_existing().download() {
-            Ok(_paths) => (),
-            // UbuntuDownloader::download() returns Err(InvalidOptions) if
-            // there's nothing to download.
-            Err(isr_dl_linux::ubuntu::Error::InvalidOptions) => {
-                tracing::info!("nothing to download");
-            }
-            Err(err) => return Err(err.into()),
-        }
-
-        Ok(destination_path)
+        Ok(image_path)
     }
 }

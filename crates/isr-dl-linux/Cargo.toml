@@ -15,6 +15,7 @@ keywords = [
 ]
 
 [dependencies]
+bon = { workspace = true }
 debpkg = { workspace = true }
 flate2 = { workspace = true }
 indexmap = { workspace = true }
