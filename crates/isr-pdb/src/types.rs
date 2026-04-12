@@ -384,12 +384,22 @@ impl<'p> PdbStruct<'p> for Struct<'p> {
     ) -> Result<(), Error> {
         match type_finder.find(type_index)?.parse()? {
             TypeData::FieldList(data) => {
+                // We don't use self.add_field()? because the pdb crate doesn't
+                // recognize the char8_t type and thus fails to parse some
+                // fields.
+                //
+                // https://github.com/getsentry/pdb/issues/130
+
                 for field in &data.fields {
-                    self.add_field(type_finder, type_index, field)?;
+                    if let Err(err) = self.add_field(type_finder, type_index, field) {
+                        tracing::warn!(%err, "failed to parse field");
+                    }
                 }
 
                 if let Some(continuation) = data.continuation {
-                    self.add_fields(type_finder, continuation)?;
+                    if let Err(err) = self.add_fields(type_finder, continuation) {
+                        tracing::warn!(%err, "failed to parse field");
+                    }
                 }
             }
 
