@@ -5,11 +5,9 @@ mod offsets;
 mod profile;
 mod symbols;
 
-pub mod __private {
-    pub use isr_core::Profile;
-
-    pub use super::{offsets::IntoField, profile::ProfileExt, symbols::IntoSymbol};
-}
+#[doc(hidden)]
+#[path = "private/mod.rs"]
+pub mod __private;
 
 pub use self::{
     error::Error,

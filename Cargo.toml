@@ -4,45 +4,56 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 
 authors = ["Petr Benes <w.benny@outlook.com>"]
 edition = "2024"
 license = "MIT"
 publish = true
-rust-version = "1.85.0"
+rust-version = "1.91.0"
 
 homepage = "https://github.com/vmi-rs/isr"
 repository = "https://github.com/vmi-rs/isr"
 
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+doc_overindented_list_items = "allow"
+
 [workspace.dependencies]
-bincode = "2"
+bon = "3"
 debpkg = "0.6"
 flate2 = "1.1"
 gimli = "0.33"
 indexmap = "2"
 memmap2 = "0.9"
-object = "0.38"
+object = "0.39"
 pdb = "0.8"
 regex = "1"
 reqwest = "0.13"
-rmp-serde = "1.1"
+rkyv = "0.8"
 serde = "1"
 serde_json = "1"
+tempfile = "3"
 thiserror = "2.0"
 tracing = "0.1"
 url = "2.5"
 
-isr-core = { path = "./crates/isr-core", version = "0.4.0" }
-isr-macros = { path = "./crates/isr-macros", version = "0.4.0" }
+# dev-dependencies
+indicatif = "0.18"
 
-isr-cache = { path = "./crates/isr-cache", version = "0.4.0" }
+isr-core = { path = "./crates/isr-core", version = "0.5.0" }
+isr-macros = { path = "./crates/isr-macros", version = "0.5.0" }
 
-isr-dwarf = { path = "./crates/isr-dwarf", version = "0.4.0" }
-isr-pdb = { path = "./crates/isr-pdb", version = "0.4.0" }
+isr-cache = { path = "./crates/isr-cache", version = "0.5.0" }
 
-isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.4.0" }
-isr-dl-pdb = { path = "./crates/isr-dl-pdb", version = "0.4.0" }
+isr-dwarf = { path = "./crates/isr-dwarf", version = "0.5.0" }
+isr-pdb = { path = "./crates/isr-pdb", version = "0.5.0" }
+
+isr-dl = { path = "./crates/isr-dl", version = "0.5.0" }
+isr-dl-linux = { path = "./crates/isr-dl-linux", version = "0.5.0" }
+isr-dl-windows = { path = "./crates/isr-dl-windows", version = "0.5.0" }
 
 [profile.release]
 debug = 1
@@ -75,6 +86,9 @@ all-features = true
 cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 rustdoc-args = ["-Zunstable-options", "--generate-link-to-definition", "--cfg", "docsrs"]
 
+[lints]
+workspace = true
+
 [dependencies]
 isr-core = { workspace = true }
 isr-macros = { workspace = true }
@@ -84,23 +98,19 @@ isr-cache = { workspace = true, optional = true }
 isr-dwarf = { workspace = true, optional = true }
 isr-pdb = { workspace = true, optional = true }
 
+isr-dl = { workspace = true, optional = true }
 isr-dl-linux = { workspace = true, optional = true }
-isr-dl-pdb = { workspace = true, optional = true }
+isr-dl-windows = { workspace = true, optional = true }
+
+[dev-dependencies]
+indicatif = { workspace = true }
 
 [features]
-default = [
-    "cache",
-    "dwarf",
-    "pdb",
-    "dl-linux",
-    "dl-pdb"
-]
+default = []
 
 cache = [
     "isr-cache",
-    "isr-cache/codec-bincode",
-    "isr-cache/codec-json",
-    "isr-cache/codec-msgpack"
+    "isr-cache/json"
 ]
 
 dwarf = [
@@ -110,15 +120,29 @@ dwarf = [
 
 pdb = [
     "isr-pdb",
-    "isr-cache?/pdb"
+    "isr-cache?/windows"
 ]
 
 dl-linux = [
+    "isr-dl",
     "isr-dl-linux",
     "isr-cache?/linux"
 ]
 
-dl-pdb = [
-    "isr-dl-pdb",
-    "isr-cache?/pdb"
+dl-windows = [
+    "isr-dl",
+    "isr-dl-windows",
+    "isr-cache?/windows"
 ]
+
+[[example]]
+name = "windows"
+path = "examples/windows.rs"
+doc-scrape-examples = true
+required-features = ["cache", "pdb", "dl-windows"]
+
+[[example]]
+name = "ubuntu"
+path = "examples/ubuntu.rs"
+doc-scrape-examples = true
+required-features = ["cache", "dwarf", "dl-linux"]

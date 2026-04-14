@@ -1,12 +1,12 @@
-use std::borrow::Cow;
+//! DWARF type extraction.
 
 use gimli::{
     Attribute, DebuggingInformationEntry, EntriesTree, EntriesTreeNode, Error, Reader as _, UnitRef,
 };
 use indexmap::map::Entry;
-use isr_core::types::{
-    ArrayRef, BaseRef, BitfieldRef, Enum, EnumRef, Field, PointerRef, Struct, StructKind,
-    StructRef, Type, Types, Variant,
+use isr_core::schema::{
+    Array, Base, Bitfield, Enum, EnumRef, Field, Pointer, Profile, Struct, StructKind, StructRef,
+    Type, Variant,
 };
 
 use super::_gimli::{DebuggingInformationEntryExt as _, Reader};
@@ -14,30 +14,35 @@ use super::_gimli::{DebuggingInformationEntryExt as _, Reader};
 fn type_name<'data>(
     unit: &UnitRef<Reader<'data>>,
     entry: &DebuggingInformationEntry<Reader<'data>>,
-) -> Result<Cow<'data, str>, Error> {
+) -> Result<String, Error> {
     match entry.name(unit)? {
-        Some(name) => Ok(name.into()),
+        Some(name) => Ok(name),
         None => {
             let offset = entry.offset().to_unit_section_offset(unit).0;
-            Ok(format!("__unnamed_{:x}", offset).into())
+            Ok(format!("__unnamed_{:x}", offset))
         }
     }
 }
 
+/// Deduplication cache keyed by `(name, byte_size, encoding)` for base types.
 pub type DwarfCache = std::collections::HashSet<(String, u64, u64)>;
 
+/// Populates a [`Profile`] with types extracted from DWARF units.
 pub trait DwarfTypes<'data>
 where
     Self: Sized,
 {
+    /// Walks a compilation unit and adds all type DIEs into `self`.
     fn add(&mut self, unit: &UnitRef<Reader<'data>>, cache: &mut DwarfCache) -> Result<(), Error>;
 
+    /// Adds an enumeration DIE and its variants.
     fn add_enum(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
         node: EntriesTreeNode<Reader<'data>>,
     ) -> Result<(), Error>;
 
+    /// Adds a struct/union/class DIE and its fields.
     fn add_struct(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -89,7 +94,7 @@ where
     ) -> Result<Self, Error>;
 }
 
-impl<'data> DwarfTypes<'data> for Types<'data> {
+impl<'data> DwarfTypes<'data> for Profile {
     fn add(&mut self, unit: &UnitRef<Reader<'data>>, cache: &mut DwarfCache) -> Result<(), Error> {
         let mut tree = unit.entries_tree(None)?;
         let mut children = tree.root()?.children();
@@ -232,7 +237,7 @@ impl<'data> DwarfTypes<'data> for Types<'data> {
     }
 }
 
-impl<'data> DwarfStruct<'data> for Struct<'data> {
+impl<'data> DwarfStruct<'data> for Struct {
     fn add_fields(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -280,10 +285,10 @@ impl<'data> DwarfStruct<'data> for Struct<'data> {
         };
 
         self.fields.insert(
-            name.into(),
+            name,
             Field {
                 offset,
-                type_: Type::new(unit, node)?,
+                ty: Type::new(unit, node)?,
             },
         );
 
@@ -291,7 +296,7 @@ impl<'data> DwarfStruct<'data> for Struct<'data> {
     }
 }
 
-impl<'data> DwarfEnum<'data> for Enum<'data> {
+impl<'data> DwarfEnum<'data> for Enum {
     fn add_fields(
         &mut self,
         unit: &UnitRef<Reader<'data>>,
@@ -353,13 +358,13 @@ impl<'data> DwarfEnum<'data> for Enum<'data> {
             }
         };
 
-        self.fields.insert(name.into(), value);
+        self.fields.insert(name, value);
 
         Ok(())
     }
 }
 
-impl<'data> DwarfType<'data> for Type<'data> {
+impl<'data> DwarfType<'data> for Type {
     fn new(
         unit: &UnitRef<Reader<'data>>,
         node: EntriesTreeNode<Reader<'data>>,
@@ -368,14 +373,14 @@ impl<'data> DwarfType<'data> for Type<'data> {
             Some(type_) => type_,
             None => {
                 // If the type is not found, it's probably a void type.
-                return Ok(Self::Base(BaseRef::Void));
+                return Ok(Self::Base(Base::Void));
             }
         };
 
         if let Some(bit_length) = node.entry().bit_size()? {
             let bit_position = node.entry().data_bit_offset()?.unwrap_or(0) % 8;
 
-            return Ok(Self::Bitfield(BitfieldRef {
+            return Ok(Self::Bitfield(Bitfield {
                 bit_length,
                 bit_position,
                 subtype: Box::new(Self::from_type(unit, type_)?),
@@ -406,7 +411,7 @@ impl<'data> DwarfType<'data> for Type<'data> {
 
             gimli::DW_TAG_pointer_type => {
                 let size = node.entry().byte_size()?.unwrap_or(0);
-                Self::Pointer(PointerRef {
+                Self::Pointer(Pointer {
                     subtype: Box::new(Self::new(unit, node)?),
                     size,
                 })
@@ -422,7 +427,7 @@ impl<'data> DwarfType<'data> for Type<'data> {
                 // dump_attrs(unit, node.entry())?;
 
                 tracing::error!(?tag, "unexpected tag");
-                Self::Base(BaseRef::Void)
+                Self::Base(Base::Void)
             }
         };
 
@@ -434,7 +439,7 @@ impl<'data> DwarfType<'data> for Type<'data> {
 fn __type_from_base_type<'data>(
     unit: &UnitRef<Reader<'data>>,
     node: EntriesTreeNode<Reader<'data>>,
-) -> Result<BaseRef, Error> {
+) -> Result<Base, Error> {
     debug_assert_eq!(node.entry().tag(), gimli::DW_TAG_base_type);
 
     let name = type_name(unit, node.entry())?;
@@ -444,12 +449,12 @@ fn __type_from_base_type<'data>(
         Some(byte_size) => byte_size,
         None => {
             tracing::warn!("base type doesn't have a byte size");
-            return Ok(BaseRef::Void);
+            return Ok(Base::Void);
         }
     };
 
     if byte_size == 0 {
-        return Ok(BaseRef::Void);
+        return Ok(Base::Void);
     }
 
     let encoding = match node.entry().encoding()? {
@@ -457,14 +462,14 @@ fn __type_from_base_type<'data>(
         None => {
             tracing::warn!("base type doesn't have an encoding");
             return Ok(match byte_size {
-                1 => BaseRef::U8,
-                2 => BaseRef::U16,
-                4 => BaseRef::U32,
-                8 => BaseRef::U64,
-                16 => BaseRef::U128,
+                1 => Base::U8,
+                2 => Base::U16,
+                4 => Base::U32,
+                8 => Base::U64,
+                16 => Base::U128,
                 _ => {
                     tracing::error!(byte_size, "unsupported base type");
-                    BaseRef::Void
+                    Base::Void
                 }
             });
         }
@@ -472,51 +477,51 @@ fn __type_from_base_type<'data>(
 
     let result = match encoding {
         gimli::DW_ATE_boolean => match byte_size {
-            1 => BaseRef::Bool,
+            1 => Base::Bool,
             _ => {
                 tracing::error!(byte_size, "unsupported boolean base type");
-                BaseRef::Void
+                Base::Void
             }
         },
         gimli::DW_ATE_signed | gimli::DW_ATE_signed_char => match byte_size {
-            1 => BaseRef::I8,
-            2 => BaseRef::I16,
-            4 => BaseRef::I32,
-            8 => BaseRef::I64,
-            16 => BaseRef::I128,
+            1 => Base::I8,
+            2 => Base::I16,
+            4 => Base::I32,
+            8 => Base::I64,
+            16 => Base::I128,
             _ => {
                 tracing::error!(byte_size, "unsupported signed base type");
-                BaseRef::Void
+                Base::Void
             }
         },
         gimli::DW_ATE_unsigned | gimli::DW_ATE_unsigned_char => match byte_size {
-            1 => BaseRef::U8,
-            2 => BaseRef::U16,
-            4 => BaseRef::U32,
-            8 => BaseRef::U64,
-            16 => BaseRef::U128,
+            1 => Base::U8,
+            2 => Base::U16,
+            4 => Base::U32,
+            8 => Base::U64,
+            16 => Base::U128,
             _ => {
                 tracing::error!(byte_size, "unsupported unsigned base type");
-                BaseRef::Void
+                Base::Void
             }
         },
         gimli::DW_ATE_float => match byte_size {
-            4 => BaseRef::F32,
-            8 => BaseRef::F64,
+            4 => Base::F32,
+            8 => Base::F64,
             _ => {
                 tracing::error!(byte_size, "unsupported float base type");
-                BaseRef::Void
+                Base::Void
             }
         },
         _ => match byte_size {
-            1 => BaseRef::U8,
-            2 => BaseRef::U16,
-            4 => BaseRef::U32,
-            8 => BaseRef::U64,
-            16 => BaseRef::U128,
+            1 => Base::U8,
+            2 => Base::U16,
+            4 => Base::U32,
+            8 => Base::U64,
+            16 => Base::U128,
             _ => {
                 tracing::error!(?encoding, byte_size, "unsupported base type");
-                BaseRef::Void
+                Base::Void
             }
         },
     };
@@ -527,7 +532,7 @@ fn __type_from_base_type<'data>(
 fn __type_from_array_type<'data>(
     unit: &UnitRef<Reader<'data>>,
     mut type_: EntriesTree<Reader<'data>>,
-) -> Result<ArrayRef<'data>, Error> {
+) -> Result<Array, Error> {
     let node = type_.root()?;
     debug_assert_eq!(node.entry().tag(), gimli::DW_TAG_array_type);
 
@@ -556,7 +561,7 @@ fn __type_from_array_type<'data>(
     // Parse the type again, since the node.children() iterator consumed the node.
     let node = type_.root()?;
 
-    Ok(ArrayRef {
+    Ok(Array {
         subtype: Box::new(Type::new(unit, node)?),
         dims,
     })

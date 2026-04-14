@@ -1,23 +1,46 @@
+//! Ubuntu archive downloader.
+
+mod artifacts;
 mod error;
-pub mod repository;
-mod repository_cache;
+mod fetcher;
+mod index;
+mod parse;
+mod repository;
+mod request;
 
 use std::{
-    fs::File,
+    cell::OnceCell,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
-use debpkg::DebPkg;
+use bon::Builder;
+use isr_dl::{Error, ProgressFn};
+use reqwest::blocking::Client;
 use url::Url;
 
 pub use self::{
-    error::Error, repository::UbuntuRepositoryEntry, repository_cache::UbuntuPackageCache,
+    artifacts::{ArtifactRef, KernelArtifacts},
+    error::UbuntuError,
+    index::{PackageIndex, PackageQuery},
+    parse::UbuntuRepositoryEntry,
+    request::{
+        ArtifactPaths, ArtifactPolicy, FilenamePolicy, UbuntuSymbolPaths, UbuntuSymbolRequest,
+    },
 };
-use crate::{LinuxBanner, LinuxVersionSignature, UbuntuVersionSignature};
+use self::{fetcher::Fetcher, repository::Repository};
+use crate::{DownloaderError, UbuntuVersionSignature};
 
-pub const DEFAULT_DDEBS_URL: &str = "http://ddebs.ubuntu.com";
-pub const DEFAULT_ARCHIVE_URL: &str = "http://cz.archive.ubuntu.com/ubuntu";
+/// Canonical archive hosting Ubuntu binary `.deb` packages.
+pub const DEFAULT_ARCHIVE_URL: &str = "https://archive.ubuntu.com/ubuntu/";
+
+/// Canonical archive hosting Ubuntu detached debug-symbol (`.ddeb`) packages.
+pub const DEFAULT_DDEBS_URL: &str = "https://ddebs.ubuntu.com/";
+
+/// Debian architecture string used when none is configured.
 pub const DEFAULT_ARCH: &str = "amd64";
+
+/// Ubuntu releases indexed by the downloader when none are configured.
 pub const DEFAULT_DISTS: &[&str] = &[
     "trusty",        // 14.04
     "xenial",        // 16.04
@@ -28,483 +51,283 @@ pub const DEFAULT_DISTS: &[&str] = &[
     "jammy-updates", // 22.04
     "noble",         // 24.04
     "noble-updates", // 24.04
+    "resolute",      // 26.04
 ];
 
-enum Filename {
-    Original,
-    Custom(PathBuf),
-}
+/// Downloads Ubuntu kernel + debug symbol `.deb` packages.
+#[derive(Builder)]
+pub struct UbuntuSymbolDownloader {
+    #[builder(field)]
+    indices: OnceCell<Vec<PackageIndex>>,
 
-pub struct UbuntuDownloader {
+    #[builder(default)]
+    client: Client,
+
+    #[builder(into, default = DEFAULT_ARCH)]
     arch: String,
+
+    #[builder(
+        default = DEFAULT_DISTS.iter().map(ToString::to_string).collect(),
+        with = |iter: impl IntoIterator<Item = impl Into<String>>| {
+            iter.into_iter().map(Into::into).collect()
+        }
+    )]
     dists: Vec<String>,
 
-    release: String,
-    version: String,
+    #[builder(
+        default = vec![
+            DEFAULT_ARCHIVE_URL.try_into().unwrap(),
+            DEFAULT_DDEBS_URL.try_into().unwrap(),
+        ],
+        with = |iter: impl IntoIterator<Item = impl Into<Url>>| {
+            iter.into_iter().map(Into::into).collect()
+        }
+    )]
+    repository_hosts: Vec<Url>,
 
-    archive_url: Url,
-    ddebs_url: Url,
+    #[builder(into)]
+    output_directory: PathBuf,
 
-    output_directory: Option<PathBuf>,
-    subdirectory: String,
-    skip_existing: bool,
+    progress: Option<ProgressFn>,
 
-    linux_image_deb: Option<Filename>,
-    linux_image_dbgsym_deb: Option<Filename>,
-    linux_modules_deb: Option<Filename>,
-    extract_linux_image: Option<Filename>,
-    extract_linux_image_dbgsym: Option<Filename>,
-    extract_systemmap: Option<Filename>,
+    /// Maximum age of cached `Packages.gz` before re-fetching.
+    /// `Duration::ZERO` always re-fetches; `Duration::MAX` always uses cache.
+    #[builder(default = Duration::from_secs(24 * 3600))]
+    index_max_age: Duration,
 }
 
-#[derive(Debug, Default)]
-pub struct UbuntuPaths {
-    pub output_directory: PathBuf,
-    pub linux_image_deb: Option<PathBuf>,
-    pub linux_image_dbgsym_deb: Option<PathBuf>,
-    pub linux_modules_deb: Option<PathBuf>,
-    pub linux_image: Option<PathBuf>,
-    pub linux_image_dbgsym: Option<PathBuf>,
-    pub systemmap: Option<PathBuf>,
-}
+impl UbuntuSymbolDownloader {
+    /// Pure filesystem lookup. Returns `Some` only if every requested artifact
+    /// (and its extraction, if requested) is already on disk.
+    pub fn lookup(&self, request: &UbuntuSymbolRequest) -> Option<UbuntuSymbolPaths> {
+        let indices = self.load_cached_indices();
+        let artifacts = KernelArtifacts::resolve(&request.version_signature, &indices).ok()?;
+        let version_dir = self.version_dir(&request.version_signature);
 
-impl UbuntuDownloader {
-    pub fn new(release: &str, revision: &str, variant: &str) -> Self {
-        //
-        // Build the Ubuntu kernel package name and version string.
-        // Example:
-        //     Ubuntu {
-        //         release: "6.8.0",
-        //         revision: "40.40~22.04.3",
-        //         kernel_flavour: "generic",
-        //         mainline_kernel_version: "6.8.12",
-        //     }
-        //
-        // ... results in:
-        //     release: "6.8.0-40-generic"
-        //     version: "6.8.0-40.40~22.04.3"
-        //
-        // See https://ubuntu.com/kernel for more information.
+        Some(UbuntuSymbolPaths {
+            output_directory: version_dir.clone(),
+            linux_image: lookup_artifact(
+                artifacts.linux_image.as_ref(),
+                request.linux_image.as_ref(),
+                &version_dir,
+            )?,
+            linux_image_dbgsym: lookup_artifact(
+                artifacts.linux_image_dbgsym.as_ref(),
+                request.linux_image_dbgsym.as_ref(),
+                &version_dir,
+            )?,
+            linux_modules: lookup_artifact(
+                artifacts.linux_modules.as_ref(),
+                request.linux_modules.as_ref(),
+                &version_dir,
+            )?,
+        })
+    }
 
-        let revision_short = match revision.split_once('.') {
-            Some((revision_short, _)) => revision_short,
-            None => revision,
+    /// Fetches missing artifacts from the network. Always loads (or refreshes)
+    /// indices; never short-circuits.
+    pub fn download(&self, request: UbuntuSymbolRequest) -> Result<UbuntuSymbolPaths, Error> {
+        self.download_inner(request)
+            .map_err(|err| Error::Other(Box::new(DownloaderError::Ubuntu(err))))
+    }
+
+    fn download_inner(
+        &self,
+        request: UbuntuSymbolRequest,
+    ) -> Result<UbuntuSymbolPaths, UbuntuError> {
+        let indices = self.fetch_indices()?;
+        let artifacts = KernelArtifacts::resolve(&request.version_signature, indices)?;
+
+        let version_dir = self.version_dir(&request.version_signature);
+        std::fs::create_dir_all(&version_dir)?;
+
+        let fetcher = Fetcher::new(&self.client, self.progress.as_ref());
+
+        let linux_image = fetch_artifact(
+            &fetcher,
+            artifacts.linux_image.as_ref(),
+            request.linux_image.as_ref(),
+            &version_dir,
+        )?;
+        let linux_image_dbgsym = fetch_artifact(
+            &fetcher,
+            artifacts.linux_image_dbgsym.as_ref(),
+            request.linux_image_dbgsym.as_ref(),
+            &version_dir,
+        )?;
+        let linux_modules = fetch_artifact(
+            &fetcher,
+            artifacts.linux_modules.as_ref(),
+            request.linux_modules.as_ref(),
+            &version_dir,
+        )?;
+
+        Ok(UbuntuSymbolPaths {
+            output_directory: version_dir,
+            linux_image,
+            linux_image_dbgsym,
+            linux_modules,
+        })
+    }
+
+    fn fetch_indices(&self) -> Result<&[PackageIndex], UbuntuError> {
+        // TODO: get_or_try_init
+        let indices = match self.indices.get() {
+            Some(indices) => indices,
+            None => {
+                let mut indices = Vec::with_capacity(self.repository_hosts.len());
+                let mut last_error = None;
+
+                for host in &self.repository_hosts {
+                    let repo = Repository::new(
+                        self.client.clone(),
+                        host.clone(),
+                        self.arch.clone(),
+                        self.dists.clone(),
+                    );
+
+                    let index = match repo.fetch_index(
+                        &self.index_dir(),
+                        self.index_max_age,
+                        self.progress.clone(),
+                    ) {
+                        Ok(index) => index,
+                        Err(err) => {
+                            tracing::warn!(%err, %host, "failed to fetch index, skipping");
+                            last_error = Some(err);
+                            continue;
+                        }
+                    };
+
+                    indices.push(index);
+                }
+
+                if indices.is_empty() {
+                    return Err(last_error.unwrap_or(UbuntuError::PackageNotFound));
+                }
+
+                self.indices.get_or_init(|| indices)
+            }
         };
 
-        let kernel_release = format!("{release}-{revision_short}-{variant}");
-        let kernel_version = format!("{release}-{revision}");
-        let subdirectory = format!("{kernel_version}-{variant}");
-
-        Self {
-            arch: DEFAULT_ARCH.into(),
-            dists: DEFAULT_DISTS.iter().map(ToString::to_string).collect(),
-            release: kernel_release,
-            version: kernel_version,
-            archive_url: DEFAULT_ARCHIVE_URL.try_into().unwrap(),
-            ddebs_url: DEFAULT_DDEBS_URL.try_into().unwrap(),
-            output_directory: None,
-            subdirectory,
-            skip_existing: false,
-            linux_image_deb: None,
-            linux_image_dbgsym_deb: None,
-            linux_modules_deb: None,
-            extract_linux_image: None,
-            extract_linux_image_dbgsym: None,
-            extract_systemmap: None,
-        }
+        Ok(indices.as_slice())
     }
 
-    pub fn from_banner(banner: &LinuxBanner) -> Result<Self, Error> {
-        match &banner.version_signature {
-            Some(LinuxVersionSignature::Ubuntu(UbuntuVersionSignature {
-                release,
-                revision,
-                kernel_flavour,
-                ..
-            })) => Ok(Self::new(release, revision, kernel_flavour)),
-            _ => Err(Error::InvalidBanner),
+    fn load_cached_indices(&self) -> Vec<PackageIndex> {
+        let mut indices = Vec::with_capacity(self.repository_hosts.len());
+        for host in &self.repository_hosts {
+            let repo = Repository::new(
+                self.client.clone(),
+                host.clone(),
+                self.arch.clone(),
+                self.dists.clone(),
+            );
+
+            let index = match repo.load_cached_index(&self.index_dir(), self.progress.clone()) {
+                Ok(index) => index,
+                Err(err) => {
+                    tracing::debug!(%host, %err, "cached index unavailable, skipping");
+                    continue;
+                }
+            };
+
+            indices.push(index);
         }
+
+        indices
     }
 
-    pub fn destination_path(&self) -> PathBuf {
-        match &self.output_directory {
-            Some(output_directory) => PathBuf::from(output_directory).join(&self.subdirectory),
-            None => PathBuf::from(&self.subdirectory),
-        }
+    fn version_dir(&self, signature: &UbuntuVersionSignature) -> PathBuf {
+        self.output_directory.join(signature.subdirectory())
     }
 
-    pub fn with_arch(self, arch: impl Into<String>) -> Self {
-        Self {
-            arch: arch.into(),
-            ..self
-        }
-    }
-
-    pub fn with_dists(self, dists: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        Self {
-            dists: dists.into_iter().map(Into::into).collect(),
-            ..self
-        }
-    }
-
-    pub fn with_archive_url(self, archive_url: Url) -> Self {
-        Self {
-            archive_url,
-            ..self
-        }
-    }
-
-    pub fn with_ddebs_url(self, ddebs_url: Url) -> Self {
-        Self { ddebs_url, ..self }
-    }
-
-    pub fn with_output_directory(self, directory: impl Into<PathBuf>) -> Self {
-        Self {
-            output_directory: Some(directory.into()),
-            ..self
-        }
-    }
-
-    pub fn skip_existing(self) -> Self {
-        Self {
-            skip_existing: true,
-            ..self
-        }
-    }
-
-    pub fn download_linux_image(self) -> Self {
-        Self {
-            linux_image_deb: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn download_linux_image_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            linux_image_deb: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn download_linux_image_dbgsym(self) -> Self {
-        Self {
-            linux_image_dbgsym_deb: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn download_linux_image_dbgsym_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            linux_image_dbgsym_deb: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn download_linux_modules(self) -> Self {
-        Self {
-            linux_modules_deb: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn download_linux_modules_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            linux_modules_deb: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn extract_linux_image(self) -> Self {
-        Self {
-            extract_linux_image: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn extract_linux_image_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            extract_linux_image: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn extract_linux_image_dbgsym(self) -> Self {
-        Self {
-            extract_linux_image_dbgsym: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn extract_linux_image_dbgsym_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            extract_linux_image_dbgsym: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn extract_systemmap(self) -> Self {
-        Self {
-            extract_systemmap: Some(Filename::Original),
-            ..self
-        }
-    }
-
-    pub fn extract_systemmap_as(self, filename: impl Into<PathBuf>) -> Self {
-        Self {
-            extract_systemmap: Some(Filename::Custom(filename.into())),
-            ..self
-        }
-    }
-
-    pub fn download(self) -> Result<UbuntuPaths, Error> {
-        //
-        // Validate options.
-        //
-
-        if self.extract_linux_image.is_some() && self.linux_image_deb.is_none() {
-            tracing::error!("extract_linux_image requires download_linux_image");
-            return Err(Error::InvalidOptions);
-        }
-
-        if self.extract_linux_image_dbgsym.is_some() && self.linux_image_dbgsym_deb.is_none() {
-            tracing::error!("extract_linux_image_dbgsym requires download_linux_image_dbgsym");
-            return Err(Error::InvalidOptions);
-        }
-
-        if self.extract_systemmap.is_some() && self.linux_modules_deb.is_none() {
-            tracing::error!("extract_systemmap requires download_linux_modules");
-            return Err(Error::InvalidOptions);
-        }
-
-        if self.linux_image_deb.is_none()
-            && self.linux_image_dbgsym_deb.is_none()
-            && self.linux_modules_deb.is_none()
-        {
-            tracing::warn!("no download options specified");
-            return Err(Error::InvalidOptions);
-        }
-
-        let destination_path = self.destination_path();
-        std::fs::create_dir_all(&destination_path)?;
-
-        let mut result = UbuntuPaths {
-            output_directory: destination_path.clone(),
-            ..Default::default()
-        };
-
-        if self.linux_image_deb.is_some() || self.linux_modules_deb.is_some() {
-            let packages = UbuntuPackageCache::fetch(self.archive_url, &self.arch, &self.dists)?;
-
-            (result.linux_image_deb, result.linux_image) = find_and_download_and_extract(
-                &packages,
-                &self.release,
-                &self.version,
-                &destination_path,
-                self.skip_existing,
-                find_linux_image_url,
-                &format!("./boot/vmlinuz-{}", self.release),
-                self.linux_image_deb,
-                self.extract_linux_image,
-            )?;
-
-            (result.linux_modules_deb, result.systemmap) = find_and_download_and_extract(
-                &packages,
-                &self.release,
-                &self.version,
-                &destination_path,
-                self.skip_existing,
-                find_linux_modules_url,
-                &format!("./boot/System.map-{}", self.release),
-                self.linux_modules_deb,
-                self.extract_systemmap,
-            )?;
-        }
-
-        if self.linux_image_dbgsym_deb.is_some() {
-            let packages = UbuntuPackageCache::fetch(self.ddebs_url, &self.arch, &self.dists)?;
-
-            (result.linux_image_dbgsym_deb, result.linux_image_dbgsym) =
-                find_and_download_and_extract(
-                    &packages,
-                    &self.release,
-                    &self.version,
-                    &destination_path,
-                    self.skip_existing,
-                    find_linux_image_dbgsym_url,
-                    &format!("./usr/lib/debug/boot/vmlinux-{}", self.release),
-                    self.linux_image_dbgsym_deb,
-                    self.extract_linux_image_dbgsym,
-                )?;
-        }
-
-        Ok(result)
+    fn index_dir(&self) -> PathBuf {
+        self.output_directory.join("_index")
     }
 }
 
-#[expect(clippy::too_many_arguments)]
-fn find_and_download_and_extract(
-    packages: &UbuntuPackageCache,
-    release: &str,
-    version: &str,
-    output_directory: &Path,
-    skip_existing: bool,
-    find_package_fn: impl Fn(&UbuntuPackageCache, &str, &str) -> Result<Url, Error>,
-    deb_entry: &str,
-    deb_filename: Option<Filename>,
-    extract_filename: Option<Filename>,
-) -> Result<(Option<PathBuf>, Option<PathBuf>), Error> {
-    let deb_filename = match deb_filename {
-        Some(deb_filename) => deb_filename,
-        None => return Ok((None, None)),
+/// Resolves the on-disk paths for one artifact according to `policy`. Returns
+/// `Some` if `policy` was `Some` and (for `lookup`) all expected files exist.
+fn lookup_artifact(
+    artifact: Option<&ArtifactRef>,
+    policy: Option<&ArtifactPolicy>,
+    version_dir: &Path,
+) -> Option<Option<ArtifactPaths>> {
+    let policy = match policy {
+        Some(policy) => policy,
+        None => return Some(None),
+    };
+    let artifact = artifact?;
+
+    let deb_path = resolve_filename(&policy.deb, &artifact.deb_filename, version_dir);
+    if !deb_path.exists() {
+        return None;
+    }
+
+    let extracted = match &policy.extract {
+        Some(extracted) => {
+            let basename = artifact
+                .extract_path
+                .file_name()
+                .and_then(|filename| filename.to_str())?;
+            let path = resolve_filename(extracted, basename, version_dir);
+
+            if !path.exists() {
+                return None;
+            }
+
+            Some(path)
+        }
+        None => None,
     };
 
-    let url = find_package_fn(packages, release, version)?;
-    let deb_path = path_from_url(&url, output_directory, deb_filename)?;
+    Some(Some(ArtifactPaths {
+        deb: deb_path,
+        extracted,
+    }))
+}
 
-    if !deb_path.exists() || !skip_existing {
-        download(url, &deb_path)?;
-    }
-    else {
-        tracing::info!(path = %deb_path.display(), "skipping download");
-    }
+/// Downloads (and optionally extracts) one artifact according to `policy`.
+fn fetch_artifact(
+    fetcher: &Fetcher<'_>,
+    artifact: Option<&ArtifactRef>,
+    policy: Option<&ArtifactPolicy>,
+    version_dir: &Path,
+) -> Result<Option<ArtifactPaths>, UbuntuError> {
+    let policy = match policy {
+        Some(policy) => policy,
+        None => return Ok(None),
+    };
+    let artifact = artifact.ok_or(UbuntuError::PackageNotFound)?;
 
-    let extract_filename = match extract_filename {
-        Some(extract_filename) => extract_filename,
-        None => return Ok((Some(deb_path), None)),
+    let deb_path = resolve_filename(&policy.deb, &artifact.deb_filename, version_dir);
+    fetcher.fetch_deb(artifact, &deb_path)?;
+
+    let extracted = match &policy.extract {
+        Some(extracted) => {
+            let basename = artifact
+                .extract_path
+                .file_name()
+                .and_then(|filename| filename.to_str())
+                .ok_or(UbuntuError::UrlMissingFilename)?;
+            let dest = resolve_filename(extracted, basename, version_dir);
+            fetcher.extract_deb_entry(&deb_path, &artifact.extract_path, &dest)?;
+            Some(dest)
+        }
+        None => None,
     };
 
-    let path = path_from_deb_entry(deb_entry, output_directory, extract_filename)?;
-
-    if !path.exists() || !skip_existing {
-        unpack_deb_entry(&deb_path, deb_entry, &path)?;
-    }
-    else {
-        tracing::info!(path = %path.display(), "skipping extraction");
-    }
-
-    Ok((Some(deb_path), Some(path)))
+    Ok(Some(ArtifactPaths {
+        deb: deb_path,
+        extracted,
+    }))
 }
 
-fn find_linux_image_url(
-    packages: &UbuntuPackageCache,
-    release: &str,
-    version: &str,
-) -> Result<Url, Error> {
-    let package = format!("linux-image-{release}");
-    if let Some(candidate) = packages.find_package(&package, version)? {
-        return packages.package_url(candidate);
+/// Joins `version_dir` with either the canonical `original` name or the
+/// caller-supplied `Custom` path.
+fn resolve_filename(policy: &FilenamePolicy, original: &str, version_dir: &Path) -> PathBuf {
+    match policy {
+        FilenamePolicy::Original => version_dir.join(original),
+        FilenamePolicy::Custom(custom) => version_dir.join(custom),
     }
-
-    let package = format!("linux-image-unsigned-{release}");
-    if let Some(candidate) = packages.find_package(&package, version)? {
-        return packages.package_url(candidate);
-    }
-
-    Err(Error::PackageNotFound)
-}
-
-fn find_linux_image_dbgsym_url(
-    packages: &UbuntuPackageCache,
-    release: &str,
-    version: &str,
-) -> Result<Url, Error> {
-    let package = format!("linux-image-{release}-dbgsym");
-    if let Some(candidate) = packages.find_dbgsym_package(&package, version)? {
-        return packages.package_url(candidate);
-    }
-
-    let package = format!("linux-image-unsigned-{release}-dbgsym");
-    if let Some(candidate) = packages.find_dbgsym_package(&package, version)? {
-        return packages.package_url(candidate);
-    }
-
-    Err(Error::PackageNotFound)
-}
-
-fn find_linux_modules_url(
-    packages: &UbuntuPackageCache,
-    release: &str,
-    version: &str,
-) -> Result<Url, Error> {
-    let package = format!("linux-modules-{release}");
-    if let Some(candidate) = packages.find_package(&package, version)? {
-        return packages.package_url(candidate);
-    }
-
-    Err(Error::PackageNotFound)
-}
-
-fn path_from_url(
-    url: &Url,
-    destination_directory: &Path,
-    filename: Filename,
-) -> Result<PathBuf, Error> {
-    fn extract_file_name_from_url(url: &Url) -> Option<String> {
-        url.path_segments()?.next_back().map(ToString::to_string)
-    }
-
-    match filename {
-        Filename::Original => match extract_file_name_from_url(url) {
-            Some(filename) => Ok(destination_directory.join(filename)),
-            None => {
-                tracing::error!("failed to extract filename from URL");
-                Err(Error::UrlDoesNotContainFilename)
-            }
-        },
-        Filename::Custom(path) => Ok(destination_directory.join(path)),
-    }
-}
-
-fn download(url: Url, destination_path: impl AsRef<Path>) -> Result<(), Error> {
-    let destination_path = destination_path.as_ref();
-
-    tracing::info!(%url, "downloading");
-    let mut response = reqwest::blocking::get(url)?.error_for_status()?;
-    let mut file = File::create(destination_path)?;
-    response.copy_to(&mut file)?;
-
-    Ok(())
-}
-
-fn path_from_deb_entry(
-    deb_entry_path: impl AsRef<Path>,
-    destination_directory: &Path,
-    filename: Filename,
-) -> Result<PathBuf, Error> {
-    match filename {
-        Filename::Original => match deb_entry_path.as_ref().file_name() {
-            Some(filename) => Ok(destination_directory.join(filename)),
-            None => {
-                tracing::error!("failed to extract filename from deb entry path");
-                Err(Error::UrlDoesNotContainFilename)
-            }
-        },
-        Filename::Custom(path) => Ok(destination_directory.join(path)),
-    }
-}
-
-fn unpack_deb_entry(
-    deb_path: impl AsRef<Path>,
-    deb_entry_path: impl AsRef<Path>,
-    destination_path: impl AsRef<Path>,
-) -> Result<(), Error> {
-    let deb_path = deb_path.as_ref();
-    let deb_entry_path = deb_entry_path.as_ref();
-    let destination_path = destination_path.as_ref();
-
-    let file = File::open(deb_path)?;
-    let mut pkg = DebPkg::parse(file)?;
-
-    let mut data = pkg.data()?;
-    for entry in data.entries()? {
-        let mut entry = entry?;
-
-        if entry.header().path()? == deb_entry_path {
-            tracing::info!(path = %deb_entry_path.display(), "unpacking");
-            entry.unpack(destination_path)?;
-            return Ok(());
-        }
-    }
-
-    Err(Error::DebEntryNotFound)
 }

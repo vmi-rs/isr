@@ -1,0 +1,31 @@
+[package]
+name = "isr-dl-windows"
+version = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+rust-version = { workspace = true }
+
+homepage = { workspace = true }
+repository = { workspace = true }
+description = "Windows downloader for ISR"
+keywords = [
+    "isr",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bon = { workspace = true }
+object = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+isr-dl = { workspace = true }

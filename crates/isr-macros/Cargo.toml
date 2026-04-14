@@ -14,14 +14,20 @@ keywords = [
     "isr",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true
+
 [dependencies]
 indexmap = { workspace = true, features = ["serde"] }
-rmp-serde = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 isr-core = { workspace = true }
 
-#[dev-dependencies]
-#isr = { path = "../..", version = { workspace = true } }
+# For testing.
+rkyv = { workspace = true, features = ["indexmap-2"] }
+
+[dev-dependencies]
+isr = { path = "../..", version = "0.5.0", features = ["cache", "dl-windows"] }

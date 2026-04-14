@@ -5,8 +5,22 @@ pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    /// An error occurred while serializing or deserializing a profile.
+    #[error(transparent)]
+    Serialization(#[from] rkyv::rancor::Error),
+
+    /// An error occurred while serializing or deserializing JSON.
+    #[cfg(feature = "json")]
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+
+    /// An error occurred while downloading a symbol file.
+    #[cfg(any(feature = "windows", feature = "linux"))]
+    #[error(transparent)]
+    Downloader(#[from] isr_dl::Error),
+
     /// An error occurred while parsing PDB symbols.
-    #[cfg(feature = "pdb")]
+    #[cfg(feature = "windows")]
     #[error(transparent)]
     Pdb(#[from] isr_pdb::Error),
 
@@ -14,19 +28,4 @@ pub enum Error {
     #[cfg(feature = "linux")]
     #[error(transparent)]
     Dwarf(#[from] isr_dwarf::Error),
-
-    /// An error occurred while downloading a PDB file.
-    #[cfg(feature = "pdb")]
-    #[error(transparent)]
-    PdbDownloader(#[from] isr_dl_pdb::Error),
-
-    /// An error occurred while downloading Linux symbols.
-    #[cfg(feature = "linux")]
-    #[error(transparent)]
-    LinuxDownloader(#[from] isr_dl_linux::Error),
-
-    /// An error occurred while parsing a Linux kernel banner.
-    #[cfg(feature = "linux")]
-    #[error("Invalid banner")]
-    InvalidBanner,
 }

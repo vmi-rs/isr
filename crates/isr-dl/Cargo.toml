@@ -1,5 +1,5 @@
 [package]
-name = "isr-dl-pdb"
+name = "isr-dl"
 version = { workspace = true }
 license = { workspace = true }
 authors = { workspace = true }
@@ -9,13 +9,17 @@ rust-version = { workspace = true }
 
 homepage = { workspace = true }
 repository = { workspace = true }
-description = "PDB downloader for ISR"
+description = "Common download infrastructure for ISR"
 keywords = [
     "isr",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true
+
 [dependencies]
-object = { workspace = true }
-reqwest = { workspace = true, features = ["blocking"] }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+url = { workspace = true }

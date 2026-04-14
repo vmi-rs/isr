@@ -15,13 +15,12 @@ impl TryFrom<SymbolDescriptor> for u64 {
     }
 }
 
-//
-//
-//
-
+/// Converts a symbol-descriptor lookup result into a concrete target type.
 pub trait IntoSymbol<T> {
+    /// Conversion error type.
     type Error;
 
+    /// Converts the lookup result into the target type.
     fn into_symbol(self) -> Result<T, Error>;
 }
 
@@ -54,11 +53,7 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 /// # Usage
 ///
 /// ```rust
-/// # use isr::{
-/// #     cache::{Codec as _, JsonCodec},
-/// #     macros::symbols,
-/// # };
-/// #
+/// # use isr_macros::symbols;
 /// symbols! {
 ///     #[derive(Debug)]
 ///     pub struct Symbols {
@@ -79,14 +74,8 @@ impl IntoSymbol<Option<u64>> for Result<SymbolDescriptor, Error> {
 /// }
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Use the profile of a Windows 10.0.18362.356 kernel.
-/// # let profile = JsonCodec::decode(include_bytes!(
-/// #   concat!(
-/// #     "../../../",
-/// #     "tests/data/cache/",
-/// #     "windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"
-/// #   )
-/// # ))?;
+/// // Profile of a Windows 10.0.18362.356 kernel.
+/// # let profile = isr_macros::__private::ntkrnlmp_profile();
 /// let symbols = Symbols::new(&profile)?;
 /// assert_eq!(symbols.PsActiveProcessHead, 0x437BC0);
 /// assert_eq!(symbols.PsInitialSystemProcess, Some(0x5733A0));

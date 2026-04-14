@@ -14,18 +14,16 @@ The main component of this crate is the [`IsrCache`] struct.
 Example of loading a profile from a PDB file using the CodeView information:
 
 ```rust,ignore
-use isr::{
-    download::pdb::CodeView,
-    cache::{IsrCache, JsonCodec},
-};
+use isr_cache::{CodeView, IsrCache};
 
 // Create a new cache instance.
-let cache = IsrCache::<JsonCodec>::new("cache")?;
+let cache = IsrCache::new("cache")?;
 
 // Use the CodeView information of the Windows 10.0.18362.356 kernel.
 let codeview = CodeView {
-    path: String::from("ntkrnlmp.pdb"),
-    guid: String::from("ce7ffb00c20b87500211456b3e905c471"),
+    name: String::from("ntkrnlmp.pdb"),
+    guid: String::from("ce7ffb00c20b87500211456b3e905c47"),
+    age: 1,
 };
 
 // Fetch and create (or get existing) the entry.
@@ -38,10 +36,10 @@ let profile = entry.profile()?;
 Example of loading a profile based on a Linux kernel banner:
 
 ```rust,ignore
-use isr::cache::{IsrCache, JsonCodec};
+use isr_cache::IsrCache;
 
 // Create a new cache instance.
-let cache = IsrCache::<JsonCodec>::new("cache")?;
+let cache = IsrCache::new("cache")?;
 
 // Use the Linux banner of the Ubuntu 6.8.0-40.40~22.04.3-generic kernel.
 let banner = "Linux version 6.8.0-40-generic \

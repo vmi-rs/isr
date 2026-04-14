@@ -1,22 +1,20 @@
-use indexmap::IndexMap;
-use isr_core::Symbols;
+use isr_core::schema::Profile;
 use pdb::{AddressMap, Error, FallibleIterator, SymbolData, SymbolIter};
 
 pub trait PdbSymbols<'p> {
-    fn parse<'s>(
+    fn parse_symbols<'s>(
+        &mut self,
         address_map: AddressMap<'s>,
         symbol_iter: SymbolIter<'p>,
-    ) -> Result<Symbols<'p>, Error>;
+    ) -> Result<(), Error>;
 }
 
-impl<'p> PdbSymbols<'p> for Symbols<'p> {
-    fn parse<'s>(
+impl<'p> PdbSymbols<'p> for Profile {
+    fn parse_symbols<'s>(
+        &mut self,
         address_map: AddressMap<'s>,
-        symbol_iter: SymbolIter<'p>,
-    ) -> Result<Symbols<'p>, Error> {
-        let mut result = IndexMap::new();
-
-        let mut symbol_iter = symbol_iter;
+        mut symbol_iter: SymbolIter<'p>,
+    ) -> Result<(), Error> {
         while let Some(symbol) = symbol_iter.next()? {
             if let SymbolData::Public(data) = symbol.parse()? {
                 let name = match std::str::from_utf8(data.name.as_bytes()) {
@@ -33,7 +31,7 @@ impl<'p> PdbSymbols<'p> for Symbols<'p> {
                 let rva = match data.offset.to_rva(&address_map) {
                     Some(rva) => rva,
                     None => {
-                        tracing::warn!(
+                        tracing::trace!(
                             name = %name,
                             rva = ?data.offset,
                             "failed to convert offset to RVA"
@@ -42,10 +40,17 @@ impl<'p> PdbSymbols<'p> for Symbols<'p> {
                     }
                 };
 
-                result.insert(name.into(), u32::from(rva).into());
+                if let Some(v) = self.symbols.insert(name.to_owned(), u32::from(rva) as _) {
+                    tracing::warn!(
+                        name = %name,
+                        rva1 = ?v,
+                        rva2 = ?rva,
+                        "duplicate symbol name with different RVAs"
+                    );
+                }
             }
         }
 
-        Ok(Self(result))
+        Ok(())
     }
 }

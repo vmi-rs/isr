@@ -27,18 +27,16 @@
 //! - **Convenient Macros:** Provides [`symbols!`] and [`offsets!`] macros for
 //!   streamlined symbol definition and type-safe access in your code.
 //!
-//! - **Codec Support:** Supports multiple serialization formats (Bincode, JSON,
-//!   MessagePack) for storing and loading profiles, letting users choose
-//!   between speed and human-readability.
+//! - **Zero-copy On-disk Format:** Profiles are stored as rkyv-archived blobs
+//!   and accessed via mmap without an explicit deserialize pass.
 //!
 //! ## Usage
 //!
-//! ```rust
+//! ```rust,no_run
 //! use isr::{
-//!     cache::JsonCodec,
-//!     download::pdb::CodeView,
+//!     download::windows::CodeView,
 //!     macros::{symbols, offsets, Field},
-//!     IsrCache, Profile,
+//!     IsrCache,
 //! };
 //!
 //! symbols! {
@@ -56,14 +54,14 @@
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # std::env::set_current_dir("tests/data/tmp")?;
 //! // Create a cache instance.
-//! let cache = IsrCache::<JsonCodec>::new("cache")?;
+//! let cache = IsrCache::new("cache")?;
 //!
 //! // Use the CodeView information of the Windows 10.0.18362.356 kernel.
 //! let entry = cache.entry_from_codeview(CodeView {
-//!     path: String::from("ntkrnlmp.pdb"),
-//!     guid: String::from("ce7ffb00c20b87500211456b3e905c471"),
+//!     name: String::from("ntkrnlmp.pdb"),
+//!     guid: String::from("ce7ffb00c20b87500211456b3e905c47"),
+//!     age: 1,
 //! })?;
 //!
 //! // You can also use `entry_from_pe` method:
@@ -74,7 +72,6 @@
 //! // Instantiate your symbol and offset structures using the profile.
 //! let symbols = Symbols::new(&profile)?;
 //! let offsets = Offsets::new(&profile)?;
-//! #
 //! # Ok(())
 //! # }
 //! ```
@@ -110,6 +107,7 @@ pub mod macros {
     pub use isr_macros::*;
 }
 
+#[cfg(feature = "cache")]
 pub mod cache {
     #![doc = include_str!("../docs/isr-cache.md")]
 
@@ -117,33 +115,41 @@ pub mod cache {
 }
 
 // Re-export the `IsrCache` to the root of the crate.
+#[cfg(feature = "cache")]
 #[doc(inline)]
 pub use self::cache::IsrCache;
 
+#[cfg(feature = "pdb")]
 pub mod pdb {
     #![doc = include_str!("../docs/isr-pdb.md")]
 
     pub use isr_pdb::*;
 }
 
+#[cfg(feature = "dwarf")]
 pub mod dwarf {
     #![doc = include_str!("../docs/isr-dwarf.md")]
 
     pub use isr_dwarf::*;
 }
 
+#[cfg(any(feature = "dl-linux", feature = "dl-windows"))]
 pub mod download {
     //! Downloaders for various symbol formats.
 
-    pub mod pdb {
-        #![doc = include_str!("../docs/isr-dl-pdb.md")]
+    pub use isr_dl::*;
 
-        pub use isr_dl_pdb::*;
-    }
-
+    #[cfg(feature = "dl-linux")]
     pub mod linux {
         #![doc = include_str!("../docs/isr-dl-linux.md")]
 
         pub use isr_dl_linux::*;
+    }
+
+    #[cfg(feature = "dl-windows")]
+    pub mod windows {
+        #![doc = include_str!("../docs/isr-dl-windows.md")]
+
+        pub use isr_dl_windows::*;
     }
 }

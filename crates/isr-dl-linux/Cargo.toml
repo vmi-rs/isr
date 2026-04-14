@@ -14,7 +14,14 @@ keywords = [
     "isr",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true
+
 [dependencies]
+bon = { workspace = true }
 debpkg = { workspace = true }
 flate2 = { workspace = true }
 indexmap = { workspace = true }
@@ -23,3 +30,8 @@ reqwest = { workspace = true, features = ["blocking"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+
+isr-dl = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

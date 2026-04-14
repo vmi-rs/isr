@@ -4,8 +4,14 @@ mod banner;
 mod error;
 pub mod ubuntu;
 
+pub use isr_dl::{Error, ProgressEvent, ProgressFn};
+
 pub use self::{
     banner::{LinuxBanner, LinuxVersionSignature, UbuntuVersionSignature},
-    error::Error,
-    ubuntu::{UbuntuDownloader, UbuntuPaths},
+    error::DownloaderError,
+    ubuntu::{
+        ArtifactPaths, ArtifactPolicy, ArtifactRef, FilenamePolicy, KernelArtifacts, PackageIndex,
+        PackageQuery, UbuntuRepositoryEntry, UbuntuSymbolDownloader, UbuntuSymbolPaths,
+        UbuntuSymbolRequest,
+    },
 };

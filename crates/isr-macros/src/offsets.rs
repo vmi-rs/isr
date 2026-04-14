@@ -143,7 +143,7 @@ impl TryFrom<FieldDescriptor> for Field {
         match value {
             FieldDescriptor::Field(field) => Ok(field),
             FieldDescriptor::Bitfield(_) => {
-                Err(Error::Conversion("expected field, found bitfield"))
+                Err(Error::DescriptorMismatch("expected field, found bitfield"))
             }
         }
     }
@@ -158,13 +158,13 @@ impl TryFrom<FieldDescriptor> for Bitfield {
             // bit position 0 and bit length equal to the field size in bits.
             FieldDescriptor::Field(field) => {
                 if field.size == 0 {
-                    return Err(Error::Conversion(
+                    return Err(Error::DescriptorMismatch(
                         "cannot convert zero-sized field to bitfield",
                     ));
                 }
 
                 if field.size > 8 {
-                    return Err(Error::Conversion(
+                    return Err(Error::DescriptorMismatch(
                         "cannot convert field larger than 8 bytes to bitfield",
                     ));
                 }
@@ -184,9 +184,18 @@ impl TryFrom<FieldDescriptor> for Bitfield {
 //
 //
 
+/// Converts a field-descriptor lookup result into a concrete target type.
+///
+/// Implemented for the `Result<FieldDescriptor, Error>` return shape used by
+/// code generated from the [`offsets!`] macro, with target types including
+/// `Field`, `Bitfield`, and their `Option`-wrapped variants.
+///
+/// [`offsets!`]: crate::offsets
 pub trait IntoField<T> {
+    /// Conversion error type (currently always [`Error`]).
     type Error;
 
+    /// Converts the lookup result into the target type, propagating any error.
     fn into_field(self) -> Result<T, Error>;
 }
 
@@ -256,11 +265,7 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 /// # Usage
 ///
 /// ```rust
-/// # use isr::{
-/// #     cache::{Codec as _, JsonCodec},
-/// #     macros::{offsets, Bitfield, Field},
-/// # };
-/// #
+/// # use isr_macros::{offsets, Bitfield, Field};
 /// offsets! {
 ///     // Defined attributes are applied to each substucture.
 ///     #[derive(Debug)]
@@ -293,19 +298,13 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 /// }
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Use the profile of a Windows 10.0.18362.356 kernel.
-/// # let profile = JsonCodec::decode(include_bytes!(
-/// #   concat!(
-/// #     "../../../",
-/// #     "tests/data/cache/",
-/// #     "windows/ntkrnlmp.pdb/ce7ffb00c20b87500211456b3e905c471/profile.json"
-/// #   )
-/// # ))?;
+/// // Profile of a Windows 10.0.18362.356 kernel (synthetic fixture).
+/// # let profile = isr_macros::__private::ntkrnlmp_profile();
 /// let offsets = Offsets::new(&profile)?;
 ///
-/// let refcnt = offsets._EX_FAST_REF.RefCnt.value_from(0x1234567890abcdef);
-/// assert_eq!(offsets._EX_FAST_REF.RefCnt.bit_position, 0);
-/// assert_eq!(offsets._EX_FAST_REF.RefCnt.bit_length, 4);
+/// let refcnt = offsets._EX_FAST_REF.RefCnt.extract(0x1234567890abcdef);
+/// assert_eq!(offsets._EX_FAST_REF.RefCnt.bit_position(), 0);
+/// assert_eq!(offsets._EX_FAST_REF.RefCnt.bit_length(), 4);
 /// assert_eq!(refcnt, 0xf);
 ///
 /// assert!(!offsets._EPROCESS.is_empty());
@@ -316,14 +315,14 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 /// // of the structure is 1072 bytes.
 /// assert_eq!(offsets._EPROCESS.effective_len(), 1072);
 ///
-/// assert_eq!(offsets._EPROCESS.UniqueProcessId.offset, 744);
-/// assert_eq!(offsets._EPROCESS.UniqueProcessId.size, 8);
+/// assert_eq!(offsets._EPROCESS.UniqueProcessId.offset(), 744);
+/// assert_eq!(offsets._EPROCESS.UniqueProcessId.size(), 8);
 ///
-/// assert_eq!(offsets._EPROCESS.WoW64Process.offset, 1064);
-/// assert_eq!(offsets._EPROCESS.WoW64Process.size, 8);
+/// assert_eq!(offsets._EPROCESS.WoW64Process.offset(), 1064);
+/// assert_eq!(offsets._EPROCESS.WoW64Process.size(), 8);
 ///
-/// assert_eq!(offsets._EPROCESS.Affinity.offset, 80);
-/// assert_eq!(offsets._EPROCESS.Affinity.size, 168);
+/// assert_eq!(offsets._EPROCESS.Affinity.offset(), 80);
+/// assert_eq!(offsets._EPROCESS.Affinity.size(), 168);
 /// # Ok(())
 /// # }
 /// ```

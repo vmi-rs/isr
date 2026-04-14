@@ -1,7 +1,7 @@
-use std::{borrow::Cow, fs::File, io::Read};
+use std::{fs::File, io::Read};
 
 use gimli::RunTimeEndian;
-use isr_core::{Profile, Symbols, types::Types};
+use isr_core::schema::{Architecture, Profile};
 use object::{Endianness, Object as _};
 
 use super::{
@@ -10,6 +10,8 @@ use super::{
     types::{DwarfCache, DwarfTypes as _},
 };
 
+/// Parses `kernel_file` (DWARF) + `systemmap_file` and hands the resulting
+/// [`Profile`] to `serialize`.
 pub fn create_profile<F, E>(
     kernel_file: File,
     mut systemmap_file: File,
@@ -29,7 +31,10 @@ where
     let dwarf_sections = super::_gimli::load_dwarf_sections(&object)?;
     let dwarf = super::_gimli::load_dwarf(&dwarf_sections, endian);
 
-    let mut types = Types::default();
+    let mut profile = Profile {
+        architecture: Architecture::Amd64,
+        ..Default::default()
+    };
 
     tracing::debug!("collecting types");
     let mut iter = dwarf.units();
@@ -48,18 +53,16 @@ where
 
         let unit = dwarf.unit(header)?;
         let unit_ref = unit.unit_ref(&dwarf);
-        types.add(&unit_ref, &mut cache)?;
+        profile.add(&unit_ref, &mut cache)?;
     }
 
     tracing::debug!("collecting symbols");
     let mut systemmap = String::new();
     systemmap_file.read_to_string(&mut systemmap)?;
-    let symbols = Symbols::parse(&systemmap)?;
+    profile.parse_symbols(&systemmap)?;
 
     tracing::debug!("writing profile");
-    let profile = Profile::new(Cow::Borrowed("Amd64"), symbols, types);
-
-    serialize(&profile).map_err(|err| Error::Serialize(err.into()))?;
+    serialize(&profile).map_err(|err| Error::Serialization(err.into()))?;
 
     Ok(())
 }

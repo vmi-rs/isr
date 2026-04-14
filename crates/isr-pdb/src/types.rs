@@ -1,8 +1,6 @@
-use std::borrow::Cow;
-
-use isr_core::types::{
-    ArrayRef, BaseRef, BitfieldRef, Enum, EnumRef, Field, PointerRef, Struct, StructKind,
-    StructRef, Type, Types, Variant,
+use isr_core::schema::{
+    Array, Base, Bitfield, Enum, EnumRef, Field, Pointer, Profile, Struct, StructKind, StructRef,
+    Type, Variant,
 };
 use pdb::{
     ClassKind, ClassType, EnumerationType, Error, Indirection, ItemFinder, ItemIter, PointerKind,
@@ -10,17 +8,17 @@ use pdb::{
 };
 
 /// Returns the type name, handling anonymous types.
-fn type_name(name: RawString<'_>, index: TypeIndex) -> Cow<'_, str> {
+fn type_name(name: RawString<'_>, index: TypeIndex) -> String {
     let name = String::from_utf8_lossy(name.as_bytes());
 
     if name.starts_with("<anonymous-")
         || name.starts_with("<unnamed-")
         || name.starts_with("__unnamed")
     {
-        return Cow::Owned(format!("__anonymous_{:x}", u32::from(index)));
+        return format!("__anonymous_{:x}", u32::from(index));
     }
 
-    name
+    name.to_string()
 }
 
 /// Returns the size of a type in bytes.
@@ -110,10 +108,11 @@ pub trait PdbTypes<'p>
 where
     Self: Sized,
 {
-    fn parse(
+    fn parse_types(
+        &mut self,
         type_finder: ItemFinder<'p, TypeIndex>,
         type_iter: ItemIter<'p, TypeIndex>,
-    ) -> Result<Self, Error>;
+    ) -> Result<(), Error>;
 
     fn add_enum(
         &mut self,
@@ -183,17 +182,16 @@ fn convert_variant(variant: pdb::Variant) -> Variant {
     }
 }
 
-impl<'p> PdbTypes<'p> for Types<'p> {
-    fn parse(
+impl<'p> PdbTypes<'p> for Profile {
+    fn parse_types(
+        &mut self,
         type_finder: ItemFinder<'p, TypeIndex>,
         type_iter: ItemIter<'p, TypeIndex>,
-    ) -> Result<Self, Error> {
+    ) -> Result<(), Error> {
         use pdb::FallibleIterator as _;
 
         let mut type_finder = type_finder;
         let mut type_iter = type_iter;
-
-        let mut result = Self::default();
 
         while let Some(typ) = type_iter.next()? {
             // keep building the index
@@ -212,22 +210,22 @@ impl<'p> PdbTypes<'p> for Types<'p> {
                 TypeData::Enumeration(enumeration)
                     if !enumeration.properties.forward_reference() =>
                 {
-                    result.add_enum(&type_finder, typ.index(), enumeration)?;
+                    self.add_enum(&type_finder, typ.index(), enumeration)?;
                 }
 
                 TypeData::Class(class) if !class.properties.forward_reference() => {
-                    result.add_class(&type_finder, typ.index(), class)?;
+                    self.add_class(&type_finder, typ.index(), class)?;
                 }
 
                 TypeData::Union(union) if !union.properties.forward_reference() => {
-                    result.add_union(&type_finder, typ.index(), union)?;
+                    self.add_union(&type_finder, typ.index(), union)?;
                 }
 
                 _ => (), // ignore everything else
             }
         }
 
-        Ok(result)
+        Ok(())
     }
 
     fn add_enum(
@@ -248,7 +246,7 @@ impl<'p> PdbTypes<'p> for Types<'p> {
         let new_enum_fields = new_enum.fields.len();
 
         if let Some(previous_udt) = self.enums.insert(name.clone(), new_enum) {
-            tracing::warn!(
+            tracing::debug!(
                 %name,
                 new_enum_fields,
                 previous_enum_fields = previous_udt.fields.len(),
@@ -284,7 +282,7 @@ impl<'p> PdbTypes<'p> for Types<'p> {
         let new_udt_fields = new_udt.fields.len();
 
         if let Some(previous_udt) = self.structs.insert(name.clone(), new_udt) {
-            tracing::warn!(
+            tracing::debug!(
                 %name,
                 new_udt_fields,
                 previous_udt_fields = previous_udt.fields.len(),
@@ -314,7 +312,7 @@ impl<'p> PdbTypes<'p> for Types<'p> {
         let new_udt_fields = new_udt.fields.len();
 
         if let Some(previous_udt) = self.structs.insert(name.clone(), new_udt) {
-            tracing::warn!(
+            tracing::debug!(
                 %name,
                 new_udt_fields,
                 previous_udt_fields = previous_udt.fields.len(),
@@ -326,13 +324,22 @@ impl<'p> PdbTypes<'p> for Types<'p> {
     }
 }
 
-impl<'p> PdbEnum<'p> for Enum<'p> {
+impl<'p> PdbEnum<'p> for Enum {
     fn add_fields(
         &mut self,
         type_finder: &TypeFinder<'p>,
         type_index: TypeIndex,
     ) -> Result<(), Error> {
-        match type_finder.find(type_index)?.parse()? {
+        let type_data = match type_finder.find(type_index)?.parse() {
+            Ok(data) => data,
+            Err(Error::UnimplementedTypeKind(kind)) => {
+                tracing::debug!(kind, "skipping unimplemented type kind (enum fields)");
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
+
+        match type_data {
             TypeData::FieldList(data) => {
                 for field in &data.fields {
                     self.add_field(type_finder, field);
@@ -344,10 +351,10 @@ impl<'p> PdbEnum<'p> for Enum<'p> {
             }
 
             type_data => {
-                tracing::warn!(
+                tracing::trace!(
                     ?type_index,
                     ?type_data,
-                    "unexpected type (expected FieldList)"
+                    "ignoring type (expected FieldList)"
                 );
             }
         }
@@ -370,19 +377,28 @@ impl<'p> PdbEnum<'p> for Enum<'p> {
             }
 
             type_data => {
-                tracing::warn!(?type_data, "unexpected type (expected Enumerate)");
+                tracing::trace!(?type_data, "ignoring type (expected Enumerate)");
             }
         }
     }
 }
 
-impl<'p> PdbStruct<'p> for Struct<'p> {
+impl<'p> PdbStruct<'p> for Struct {
     fn add_fields(
         &mut self,
         type_finder: &TypeFinder<'p>,
         type_index: TypeIndex,
     ) -> Result<(), Error> {
-        match type_finder.find(type_index)?.parse()? {
+        let type_data = match type_finder.find(type_index)?.parse() {
+            Ok(data) => data,
+            Err(Error::UnimplementedTypeKind(kind)) => {
+                tracing::debug!(kind, "skipping unimplemented type kind (struct fields)");
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        };
+
+        match type_data {
             TypeData::FieldList(data) => {
                 // We don't use self.add_field()? because the pdb crate doesn't
                 // recognize the char8_t type and thus fails to parse some
@@ -396,18 +412,18 @@ impl<'p> PdbStruct<'p> for Struct<'p> {
                     }
                 }
 
-                if let Some(continuation) = data.continuation {
-                    if let Err(err) = self.add_fields(type_finder, continuation) {
-                        tracing::warn!(%err, "failed to parse field");
-                    }
+                if let Some(continuation) = data.continuation
+                    && let Err(err) = self.add_fields(type_finder, continuation)
+                {
+                    tracing::warn!(%err, "failed to parse field");
                 }
             }
 
             type_data => {
-                tracing::warn!(
+                tracing::trace!(
                     ?type_index,
                     ?type_data,
-                    "unexpected type (expected FieldList)"
+                    "ignoring type (expected FieldList)"
                 );
             }
         }
@@ -427,13 +443,13 @@ impl<'p> PdbStruct<'p> for Struct<'p> {
                     type_name(data.name, type_index),
                     Field {
                         offset: data.offset,
-                        type_: Type::new(type_finder, data.field_type)?,
+                        ty: Type::new(type_finder, data.field_type)?,
                     },
                 );
             }
 
             type_data => {
-                tracing::warn!(?type_data, "unexpected type (expected Member)");
+                tracing::trace!(?type_data, "ignoring type (expected Member)");
             }
         }
 
@@ -441,11 +457,11 @@ impl<'p> PdbStruct<'p> for Struct<'p> {
     }
 }
 
-impl<'p> PdbType<'p> for Type<'p> {
+impl<'p> PdbType<'p> for Type {
     fn new(type_finder: &TypeFinder<'p>, type_index: TypeIndex) -> Result<Self, Error> {
         let result = match type_finder.find(type_index)?.parse()? {
             TypeData::Primitive(data) => match data.indirection {
-                Some(indirection) => Self::Pointer(PointerRef {
+                Some(indirection) => Self::Pointer(Pointer {
                     subtype: Box::new(from_primitive_kind(data.kind)),
                     size: match indirection {
                         Indirection::Near16 | Indirection::Far16 | Indirection::Huge16 => 2,
@@ -479,7 +495,7 @@ impl<'p> PdbType<'p> for Type<'p> {
 
                 let element_type_size = type_size(type_finder, element_type)?;
                 if element_type_size == 0 {
-                    tracing::warn!(
+                    tracing::debug!(
                         ?type_index,
                         "element type has size 0, dimensions may be incorrect"
                     );
@@ -498,13 +514,13 @@ impl<'p> PdbType<'p> for Type<'p> {
                     })
                     .collect::<Vec<_>>();
 
-                Self::Array(ArrayRef {
+                Self::Array(Array {
                     subtype: Box::new(Self::new(type_finder, element_type)?),
                     dims: dims.into_iter().rev().collect(),
                 })
             }
 
-            TypeData::Pointer(data) => Self::Pointer(PointerRef {
+            TypeData::Pointer(data) => Self::Pointer(Pointer {
                 subtype: Box::new(Self::new(type_finder, data.underlying_type)?),
                 size: match data.attributes.pointer_kind() {
                     PointerKind::Near16 | PointerKind::Far16 | PointerKind::Huge16 => 2,
@@ -523,7 +539,7 @@ impl<'p> PdbType<'p> for Type<'p> {
                 },
             }),
 
-            TypeData::Bitfield(data) => Self::Bitfield(BitfieldRef {
+            TypeData::Bitfield(data) => Self::Bitfield(Bitfield {
                 bit_length: data.length as u64,
                 bit_position: data.position as u64,
                 subtype: Box::new(Self::new(type_finder, data.underlying_type)?),
@@ -534,8 +550,8 @@ impl<'p> PdbType<'p> for Type<'p> {
             TypeData::Modifier(data) => Self::new(type_finder, data.underlying_type)?,
 
             type_data => {
-                tracing::error!(?type_data, "Unknown type");
-                Self::Base(BaseRef::Void)
+                tracing::error!(?type_data, "unknown type");
+                Self::Base(Base::Void)
             }
         };
 
@@ -543,37 +559,38 @@ impl<'p> PdbType<'p> for Type<'p> {
     }
 }
 
-fn from_primitive_kind<'p>(kind: PrimitiveKind) -> Type<'p> {
+fn from_primitive_kind(kind: PrimitiveKind) -> Type {
     Type::Base(match kind {
-        PrimitiveKind::NoType | PrimitiveKind::Void => BaseRef::Void,
+        PrimitiveKind::NoType | PrimitiveKind::Void => Base::Void,
 
-        PrimitiveKind::Bool8 | PrimitiveKind::Bool16 | PrimitiveKind::Bool32
-        | PrimitiveKind::Bool64 => BaseRef::Bool,
+        PrimitiveKind::Bool8
+        | PrimitiveKind::Bool16
+        | PrimitiveKind::Bool32
+        | PrimitiveKind::Bool64 => Base::Bool,
 
-        PrimitiveKind::RChar | PrimitiveKind::Char | PrimitiveKind::UChar => BaseRef::Char,
-        PrimitiveKind::WChar => BaseRef::Wchar,
-        PrimitiveKind::RChar16 => BaseRef::U16,
-        PrimitiveKind::RChar32 => BaseRef::U32,
+        PrimitiveKind::RChar | PrimitiveKind::Char | PrimitiveKind::UChar => Base::Char8,
+        PrimitiveKind::WChar | PrimitiveKind::RChar16 => Base::Char16,
+        PrimitiveKind::RChar32 => Base::Char32,
 
-        PrimitiveKind::I8 => BaseRef::I8,
-        PrimitiveKind::U8 => BaseRef::U8,
-        PrimitiveKind::I16 | PrimitiveKind::Short => BaseRef::I16,
-        PrimitiveKind::U16 | PrimitiveKind::UShort => BaseRef::U16,
-        PrimitiveKind::I32 | PrimitiveKind::Long | PrimitiveKind::HRESULT => BaseRef::I32,
-        PrimitiveKind::U32 | PrimitiveKind::ULong => BaseRef::U32,
-        PrimitiveKind::I64 | PrimitiveKind::Quad => BaseRef::I64,
-        PrimitiveKind::U64 | PrimitiveKind::UQuad => BaseRef::U64,
-        PrimitiveKind::I128 | PrimitiveKind::Octa => BaseRef::I128,
-        PrimitiveKind::U128 | PrimitiveKind::UOcta => BaseRef::U128,
+        PrimitiveKind::I8 => Base::I8,
+        PrimitiveKind::U8 => Base::U8,
+        PrimitiveKind::I16 | PrimitiveKind::Short => Base::I16,
+        PrimitiveKind::U16 | PrimitiveKind::UShort => Base::U16,
+        PrimitiveKind::I32 | PrimitiveKind::Long | PrimitiveKind::HRESULT => Base::I32,
+        PrimitiveKind::U32 | PrimitiveKind::ULong => Base::U32,
+        PrimitiveKind::I64 | PrimitiveKind::Quad => Base::I64,
+        PrimitiveKind::U64 | PrimitiveKind::UQuad => Base::U64,
+        PrimitiveKind::I128 | PrimitiveKind::Octa => Base::I128,
+        PrimitiveKind::U128 | PrimitiveKind::UOcta => Base::U128,
 
-        PrimitiveKind::F16 => BaseRef::F16,
-        PrimitiveKind::F32 | PrimitiveKind::F32PP => BaseRef::F32,
-        PrimitiveKind::F64 => BaseRef::F64,
-        PrimitiveKind::F80 | PrimitiveKind::F128 => BaseRef::F128,
+        PrimitiveKind::F16 => Base::F16,
+        PrimitiveKind::F32 | PrimitiveKind::F32PP => Base::F32,
+        PrimitiveKind::F64 => Base::F64,
+        PrimitiveKind::F80 | PrimitiveKind::F128 => Base::F128,
 
         _ => {
-            tracing::error!(?kind, "Unhandled primitive");
-            BaseRef::Void
+            tracing::error!(?kind, "unhandled primitive");
+            Base::Void
         }
     })
 }

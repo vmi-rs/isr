@@ -14,6 +14,12 @@ keywords = [
     "isr",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true
+
 [dependencies]
 gimli = { workspace = true }
 indexmap = { workspace = true }
