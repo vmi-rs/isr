@@ -30,4 +30,4 @@ isr-core = { workspace = true }
 rkyv = { workspace = true, features = ["indexmap-2"] }
 
 [dev-dependencies]
-isr = { path = "../..", version = "0.5.0", features = ["cache", "dl-windows"] }
+isr = { path = "../..", features = ["cache", "dl-windows"] }
