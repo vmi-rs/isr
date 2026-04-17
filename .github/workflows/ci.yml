@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - run: cargo build --examples
+      - run: cargo build --examples --all-features
 
   test:
     name: cargo test
