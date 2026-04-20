@@ -242,13 +242,16 @@ pub struct StructFieldKind<'a> {
     pub value: FieldValueKind<'a>,
 }
 
-/// Decodes each field of `struct_def` from `data` and invokes `visitor`.
-pub fn visit_struct(
+/// Decodes each field of a struct from `data` and invokes `visitor`.
+///
+/// `visitor` can return an error to stop visiting early. Returns `Ok(())` if
+/// all fields were visited.
+pub fn visit_struct<E>(
     profile: &Profile,
     struct_def: &Struct,
-    mut visitor: impl FnMut(&StructField),
+    mut visitor: impl FnMut(&StructField) -> Result<(), E>,
     data: &[u8],
-) {
+) -> Result<(), E> {
     for field in struct_def.fields() {
         let offset = field.offset() as usize;
         let value = make_value(profile, field.ty(), data, offset);
@@ -257,16 +260,21 @@ pub fn visit_struct(
             name: field.name(),
             offset,
             value,
-        });
+        })?;
     }
+
+    Ok(())
 }
 
-/// Walks each field of `struct_def` by type only, without reading data.
-pub fn visit_struct_only(
+/// Walks each field of a struct by type only, without reading data.
+///
+/// `visitor` can return an error to stop vi+siting early. Returns `Ok(())` if
+/// all fields were visited.
+pub fn visit_struct_schema<E>(
     profile: &Profile,
     struct_def: Struct,
-    mut visitor: impl FnMut(&StructFieldKind),
-) {
+    mut visitor: impl FnMut(&StructFieldKind) -> Result<(), E>,
+) -> Result<(), E> {
     for field in struct_def.fields() {
         let offset = field.offset() as usize;
         let value = make_value_kind(profile, field.ty());
@@ -275,8 +283,10 @@ pub fn visit_struct_only(
             name: field.name(),
             offset,
             value,
-        });
+        })?;
     }
+
+    Ok(())
 }
 
 #[expect(clippy::unnecessary_cast)]

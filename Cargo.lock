@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "isr"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indicatif",
  "isr-cache",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "isr-cache"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "isr-core",
  "isr-dl",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "isr-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap 2.14.0",
  "rkyv",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "thiserror 2.0.18",
  "url",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl-linux"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bon",
  "debpkg",
@@ -937,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl-windows"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bon",
  "isr-dl",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dwarf"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "gimli",
  "indexmap 2.14.0",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "isr-macros"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap 2.14.0",
  "isr",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "isr-pdb"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "indexmap 2.14.0",
  "isr-core",
