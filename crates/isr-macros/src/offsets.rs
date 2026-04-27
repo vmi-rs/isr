@@ -18,18 +18,18 @@ pub struct Field {
 
 impl Field {
     /// Creates a new field descriptor.
-    pub fn new(offset: u64, size: u64) -> Self {
+    pub const fn new(offset: u64, size: u64) -> Self {
         Self { offset, size }
     }
 
     /// Returns the offset of the field from the beginning of the structure,
     /// in bytes.
-    pub fn offset(&self) -> u64 {
+    pub const fn offset(&self) -> u64 {
         self.offset
     }
 
     /// Returns the size of the field, in bytes.
-    pub fn size(&self) -> u64 {
+    pub const fn size(&self) -> u64 {
         self.size
     }
 }
@@ -60,7 +60,7 @@ impl std::ops::Deref for Bitfield {
 
 impl Bitfield {
     /// Creates a new bitfield descriptor.
-    pub fn new(offset: u64, size: u64, bit_position: u64, bit_length: u64) -> Self {
+    pub const fn new(offset: u64, size: u64, bit_position: u64, bit_length: u64) -> Self {
         Self {
             field: Field::new(offset, size),
             bit_position,
@@ -69,21 +69,21 @@ impl Bitfield {
     }
 
     /// Returns the starting bit position of the bitfield within the underlying field.
-    pub fn bit_position(&self) -> u64 {
+    pub const fn bit_position(&self) -> u64 {
         self.bit_position
     }
 
     /// Returns the length of the bitfield, in bits.
-    pub fn bit_length(&self) -> u64 {
+    pub const fn bit_length(&self) -> u64 {
         self.bit_length
     }
 
     /// This method performs bitwise operations to isolate and return the
     /// value represented by the bitfield within the provided integer.
-    pub fn extract(&self, value: u64) -> u64 {
+    pub const fn extract(&self, value: u64) -> u64 {
         assert!(self.bit_length <= 64, "bit length cannot exceed 64 bits");
         assert!(
-            self.bit_position + self.bit_length <= self.size * 8,
+            self.bit_position + self.bit_length <= self.field.size * 8,
             "bitfield exceeds field size"
         );
 
@@ -109,18 +109,18 @@ pub enum FieldDescriptor {
 
 impl FieldDescriptor {
     /// Returns the offset of the field or bitfield, in bytes.
-    pub fn offset(&self) -> u64 {
+    pub const fn offset(&self) -> u64 {
         match self {
             FieldDescriptor::Field(field) => field.offset,
-            FieldDescriptor::Bitfield(bitfield) => bitfield.offset,
+            FieldDescriptor::Bitfield(bitfield) => bitfield.field.offset,
         }
     }
 
     /// Returns the size of the field or bitfield, in bytes.
-    pub fn size(&self) -> u64 {
+    pub const fn size(&self) -> u64 {
         match self {
             FieldDescriptor::Field(field) => field.size,
-            FieldDescriptor::Bitfield(bitfield) => bitfield.size,
+            FieldDescriptor::Bitfield(bitfield) => bitfield.field.size,
         }
     }
 }
