@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `#[isr(optional)]` struct attribute in the `offsets!` macro.
+
 ### Fixed
 
 ## [0.6.0] - 2026-04-20

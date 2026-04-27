@@ -159,6 +159,30 @@ fn build_ntkrnlmp_subset() -> OwnedProfile {
         },
     );
 
+    structs.insert(
+        "_LIST_ENTRY".to_owned(),
+        Struct {
+            kind: StructKind::Struct,
+            size: 16,
+            fields: field_map([
+                (
+                    "Flink",
+                    Field {
+                        offset: 0,
+                        ty: void_ptr(),
+                    },
+                ),
+                (
+                    "Blink",
+                    Field {
+                        offset: 8,
+                        ty: void_ptr(),
+                    },
+                ),
+            ]),
+        },
+    );
+
     // Stored under the _K prefix to exercise offsets!'s struct-alias resolution.
     structs.insert(
         "_KLDR_DATA_TABLE_ENTRY".to_owned(),

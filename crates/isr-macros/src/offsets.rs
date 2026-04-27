@@ -294,6 +294,20 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 ///             DllBase: Field,
 ///             FullDllName: Field,
 ///         }
+///
+///         // Mark a structure as optional.
+///         #[isr(optional)]
+///         struct _LIST_ENTRY {
+///             Flink: Field,
+///             Blink: Field,
+///         }
+///
+///         // Also optional, but the profile does not declare this
+///         // type and the outer field will resolve to `None`.
+///         #[isr(optional)]
+///         struct _KMISSING_FROM_PROFILE {
+///             Whatever: Field,
+///         }
 ///     }
 /// }
 ///
@@ -323,6 +337,15 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 ///
 /// assert_eq!(offsets._EPROCESS.Affinity.offset(), 80);
 /// assert_eq!(offsets._EPROCESS.Affinity.size(), 168);
+///
+/// // `_LIST_ENTRY` is present in the profile, so the optional field
+/// // resolves to `Some(...)`.
+/// let list_entry = offsets._LIST_ENTRY.as_ref().expect("_LIST_ENTRY present");
+/// assert_eq!(list_entry.Flink.offset(), 0);
+/// assert_eq!(list_entry.Blink.offset(), 8);
+///
+/// // `_KMISSING_FROM_PROFILE` is not declared, so it resolves to `None`.
+/// assert!(offsets._KMISSING_FROM_PROFILE.is_none());
 /// # Ok(())
 /// # }
 /// ```
@@ -336,6 +359,12 @@ impl IntoField<Option<Bitfield>> for Result<FieldDescriptor, Error> {
 ///   `<alias>` can be a single literal or an array of literals, e.g.:
 ///   - `#[isr(alias = "alternative_name")]`
 ///   - `#[isr(alias = ["name1", "name2", ...])]`
+///
+/// - `#[isr(optional)]`: Marks a structure as optional. The outer field
+///   becomes `Option<...>` and resolves to `None` when no struct with the
+///   given name (or any alias) is present in the profile. Missing fields
+///   on a present type still error - `optional` only relaxes the existence
+///   check on the type itself. Composes with `alias` in either order.
 ///
 /// The generated struct provides a `new` method that takes a reference to
 /// a [`Profile`] and returns a [`Result`] containing the populated struct or
@@ -389,7 +418,7 @@ macro_rules! offsets {
         $($meta)*
         $vis struct $name {
             $(
-                $vis $iname: $iname,
+                $vis $iname: $crate::offsets!(@field-type $iname, [$($($iattr)*)?]),
             )*
         }
 
@@ -398,7 +427,7 @@ macro_rules! offsets {
             $vis fn new(profile: &$crate::__private::Profile) -> Result<Self, $crate::Error> {
                 Ok(Self {
                     $(
-                        $iname: $iname::new(profile)?,
+                        $iname: $crate::offsets!(@field-init profile, $iname, [$($($iattr)*)?]),
                     )+
                 })
             }
@@ -473,6 +502,18 @@ macro_rules! offsets {
                 })
             }
 
+            /// Like [`Self::new`], but returns `Ok(None)` when the type is
+            /// not present in the profile under any of its known names.
+            $vis fn try_new(
+                profile: &$crate::__private::Profile,
+            ) -> Result<Option<Self>, $crate::Error> {
+                match Self::new(profile) {
+                    Ok(instance) => Ok(Some(instance)),
+                    Err($crate::Error::TypeNotFound(_)) => Ok(None),
+                    Err(err) => Err(err),
+                }
+            }
+
             /// Returns `true` if the structure does not contain any fields.
             $vis fn is_empty(&self) -> bool {
                 self.__len == 0
@@ -506,6 +547,34 @@ macro_rules! offsets {
     //
     // @find
     //
+    // The first three arms strip a struct-level `optional` token from
+    // anywhere in the attribute list and re-dispatch to the alias arms
+    // below.
+    //
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        [optional]
+    ) => {
+        $crate::offsets!(@find $profile, $iname, [])
+    };
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        [optional, $($rest:tt)*]
+    ) => {
+        $crate::offsets!(@find $profile, $iname, [$($rest)*])
+    };
+
+    (@find
+        $profile:ident,
+        $iname:ident,
+        [$($head:tt)+, optional]
+    ) => {
+        $crate::offsets!(@find $profile, $iname, [$($head)+])
+    };
 
     (@find
         $profile:ident,
@@ -594,4 +663,63 @@ macro_rules! offsets {
                 )
             )+
     }};
+
+    //
+    // @field-type
+    //
+    // Walks the per-struct attribute list looking for `optional`. If found,
+    // expands to `Option<$iname>`, otherwise expands to bare `$iname`.
+    //
+
+    (@field-type
+        $iname:ident,
+        [optional $(, $($_rest:tt)*)?]
+    ) => {
+        Option<$iname>
+    };
+
+    (@field-type
+        $iname:ident,
+        [$_head:tt $($rest:tt)*]
+    ) => {
+        $crate::offsets!(@field-type $iname, [$($rest)*])
+    };
+
+    (@field-type
+        $iname:ident,
+        []
+    ) => {
+        $iname
+    };
+
+    //
+    // @field-init
+    //
+    // Same muncher shape as @field-type. Picks `try_new` when `optional` is
+    // present anywhere in the attribute list, `new` otherwise.
+    //
+
+    (@field-init
+        $profile:ident,
+        $iname:ident,
+        [optional $(, $($_rest:tt)*)?]
+    ) => {
+        $iname::try_new($profile)?
+    };
+
+    (@field-init
+        $profile:ident,
+        $iname:ident,
+        [$_head:tt $($rest:tt)*]
+    ) => {
+        $crate::offsets!(@field-init $profile, $iname, [$($rest)*])
+    };
+
+    (@field-init
+        $profile:ident,
+        $iname:ident,
+        []
+    ) => {
+        $iname::new($profile)?
+    };
 }
