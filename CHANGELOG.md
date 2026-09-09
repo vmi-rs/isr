@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.8.0] - 2026-09-09
+
+### Changed
+
+- **Breaking:** Updated `gimli` to 0.34 and `object` to 0.40.
+
 ## [0.7.0] - 2026-06-24
 
 ### Added
