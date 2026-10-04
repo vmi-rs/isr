@@ -82,3 +82,53 @@ fn dsym_rejects_non_macho_files() {
 
     assert!(matches!(result, Err(Error::UnsupportedFormat(_))));
 }
+
+/// Returns a universal binary with an x86_64 placeholder slice followed by
+/// `arm64` as the arm64 slice.
+fn universal_binary(arm64: &[u8], arm64_cputype: u32) -> Vec<u8> {
+    const X86_64_OFFSET: u32 = 0x1000;
+    const ARM64_OFFSET: u32 = 0x2000;
+    let x86_64 = b"x86_64 placeholder";
+
+    let mut data = Vec::new();
+    data.extend_from_slice(&0xcafe_babe_u32.to_be_bytes());
+    data.extend_from_slice(&2_u32.to_be_bytes());
+    for (cputype, offset, size) in [
+        (0x0100_0007, X86_64_OFFSET, x86_64.len()),
+        (arm64_cputype, ARM64_OFFSET, arm64.len()),
+    ] {
+        data.extend_from_slice(&u32::to_be_bytes(cputype));
+        data.extend_from_slice(&0_u32.to_be_bytes());
+        data.extend_from_slice(&offset.to_be_bytes());
+        data.extend_from_slice(&u32::try_from(size).unwrap().to_be_bytes());
+        data.extend_from_slice(&12_u32.to_be_bytes());
+    }
+
+    data.resize(X86_64_OFFSET as usize, 0);
+    data.extend_from_slice(x86_64);
+    data.resize(ARM64_OFFSET as usize, 0);
+    data.extend_from_slice(arm64);
+    data
+}
+
+#[test]
+fn universal_binary_uuid_comes_from_arm64_slice() {
+    let thin = std::fs::read(fixture("macho_arm64")).unwrap();
+    let uuid = isr_dwarf::macho_uuid(&thin).unwrap();
+    assert!(uuid.is_some());
+
+    let fat = universal_binary(&thin, 0x0100_000c);
+    assert_eq!(isr_dwarf::macho_uuid(&fat).unwrap(), uuid);
+}
+
+#[test]
+fn universal_binary_without_arm64_slice_is_rejected() {
+    let thin = std::fs::read(fixture("macho_arm64")).unwrap();
+
+    // Both slices claim to be x86_64.
+    let fat = universal_binary(&thin, 0x0100_0007);
+    assert!(matches!(
+        isr_dwarf::macho_uuid(&fat),
+        Err(Error::MissingArm64Slice)
+    ));
+}

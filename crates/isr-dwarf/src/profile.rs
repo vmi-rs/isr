@@ -60,10 +60,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     let dsym_mmap = unsafe { memmap2::Mmap::map(&dsym_file)? };
-    let object = object::File::parse(macho_slice(&dsym_mmap)?)?;
-    if object.format() != BinaryFormat::MachO {
-        return Err(Error::UnsupportedFormat(object.format()));
-    }
+    let object = parse_macho(&dsym_mmap)?;
 
     let mut profile = Profile {
         architecture: architecture(&object),
@@ -82,6 +79,26 @@ where
     serialize(&profile).map_err(|err| Error::Serialization(err.into()))?;
 
     Ok(())
+}
+
+/// Returns the `LC_UUID` of a Mach-O dSYM or kernel image.
+///
+/// From a universal binary, the UUID of the arm64 slice is returned,
+/// preferring arm64e. This is the slice [`create_profile_from_dsym`] builds
+/// the profile from.
+pub fn macho_uuid(data: &[u8]) -> Result<Option<[u8; 16]>, Error> {
+    Ok(parse_macho(data)?.mach_uuid()?)
+}
+
+/// Parses the Mach-O file in `data`, selecting the arm64 slice of a
+/// universal binary.
+fn parse_macho(data: &[u8]) -> Result<object::File<'_>, Error> {
+    let object = object::File::parse(macho_slice(data)?)?;
+    if object.format() != BinaryFormat::MachO {
+        return Err(Error::UnsupportedFormat(object.format()));
+    }
+
+    Ok(object)
 }
 
 /// Adds the types described by the DWARF sections of `object`.

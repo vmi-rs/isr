@@ -30,11 +30,6 @@ pub enum Error {
     #[error(transparent)]
     Dwarf(#[from] isr_dwarf::Error),
 
-    /// An error occurred while parsing a Mach-O file.
-    #[cfg(feature = "macos")]
-    #[error(transparent)]
-    Object(#[from] object::read::Error),
-
     /// The dSYM has no `LC_UUID` load command.
     #[cfg(feature = "macos")]
     #[error("dSYM has no LC_UUID")]

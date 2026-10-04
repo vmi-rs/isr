@@ -571,12 +571,12 @@ fn create_profile_from_dsym(profile_path: PathBuf, dsym_path: &Path) -> Result<E
 }
 
 /// Reads the `LC_UUID` of the Mach-O file at `path`.
+///
+/// The UUID comes from the slice the profile is built from.
 #[cfg(feature = "macos")]
 fn mach_uuid(path: &Path) -> Result<Option<[u8; 16]>, Error> {
-    use object::Object as _;
-
     let data = unsafe { Mmap::map(&File::open(path)?)? };
-    Ok(object::File::parse(&*data)?.mach_uuid()?)
+    Ok(isr_dwarf::macho_uuid(&data)?)
 }
 
 /// Formats `uuid` as uppercase hex with dashes, e.g.

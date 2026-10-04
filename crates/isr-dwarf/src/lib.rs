@@ -10,5 +10,5 @@ pub mod units;
 
 pub use self::{
     error::Error,
-    profile::{create_profile, create_profile_from_dsym},
+    profile::{create_profile, create_profile_from_dsym, macho_uuid},
 };

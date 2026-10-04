@@ -40,12 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `isr_dwarf::create_profile_from_dsym`, which builds a profile from a
     Mach-O dSYM: DWARF types, Mach-O symbols with one leading underscore
     stripped, and `LC_SEGMENT_64` segments. A universal binary uses its arm64
-    slice.
+    slice. `isr_dwarf::macho_uuid` reads the `LC_UUID` of the same slice.
   - `macos` feature of `isr-cache` with `with_kdk_downloader`,
     `kdk_downloader`, `download_from_darwin_version`,
     `entry_from_darwin_version` (with an optional `LC_UUID` check) and
-    `entry_from_dsym`, plus the `Object`, `MissingUuid` and `UuidMismatch`
-    error variants.
+    `entry_from_dsym`, plus the `MissingUuid` and `UuidMismatch` error
+    variants. Universal dSYMs are keyed and checked by the UUID of their
+    arm64 slice.
   - `dl-macos` feature, `isr::download::macos` module and `macos` example.
 - `schema::Segment` and the `Segment` view with `Profile::segments`,
   `Profile::find_segment` and `Profile::segment_containing`.
