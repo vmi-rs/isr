@@ -13,7 +13,7 @@ use isr_core::schema::{
 
 use super::{
     _gimli::{DebuggingInformationEntryExt as _, Reader},
-    units::DwarfUnits,
+    units::{DwarfUnits, Reference},
 };
 
 /// LLVM pointer authentication qualifier (`DW_TAG_LLVM_ptrauth_type`).
@@ -40,9 +40,10 @@ pub trait DwarfTypes<'data> {
 impl<'data> DwarfTypes<'data> for Profile {
     fn add_types(&mut self, units: &DwarfUnits<'data>) -> Result<(), Error> {
         let mut index = DeclIndex::default();
-        for (unit_index, unit) in units.iter().enumerate() {
+        for unit_index in 0..units.len() {
             tracing::debug!("indexing types: {}/{}", unit_index + 1, units.len());
-            index.add_unit(unit)?;
+            let unit = units.unit(unit_index)?;
+            index.add_unit(units.unit_ref(&unit))?;
         }
 
         let collector = TypeCollector {
@@ -51,9 +52,10 @@ impl<'data> DwarfTypes<'data> for Profile {
             qualified_names: index.qualified_names,
         };
 
-        for (unit_index, unit) in units.iter().enumerate() {
+        for unit_index in 0..units.len() {
             tracing::debug!("collecting types: {}/{}", unit_index + 1, units.len());
-            collector.add_unit(self, unit)?;
+            let unit = units.unit(unit_index)?;
+            collector.add_unit(self, units.unit_ref(&unit))?;
         }
 
         Ok(())
@@ -348,7 +350,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_unit(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
     ) -> Result<(), Error> {
         let mut tree = unit.entries_tree(None)?;
         let root = tree.root()?;
@@ -361,7 +363,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_scope(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
         cplusplus: bool,
     ) -> Result<(), Error> {
@@ -388,7 +390,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_definition(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<(), Error> {
         let entry = node.entry();
@@ -408,7 +410,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_nested_definitions(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<(), Error> {
         let mut children = node.children();
@@ -454,7 +456,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_enum(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<(), Error> {
         let entry = node.entry();
@@ -523,7 +525,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_struct(
         &self,
         profile: &mut Profile,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
         kind: StructKind,
     ) -> Result<(), Error> {
@@ -593,7 +595,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     fn add_field(
         &self,
         udt: &mut Struct,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         entry: &DebuggingInformationEntry<Reader<'data>>,
     ) -> Result<(), Error> {
         // Static data members are declarations without a location.
@@ -635,7 +637,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     /// A missing attribute denotes `void`.
     fn attr_type(
         &self,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         entry: &DebuggingInformationEntry<Reader<'data>>,
     ) -> Result<Type, Error> {
         let value = match entry.attr_value(gimli::DW_AT_type) {
@@ -643,8 +645,11 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
             None => return Ok(Type::Base(Base::Void)),
         };
 
-        match self.units.resolve(unit, value.clone()) {
-            Some((unit, offset)) => self.type_at(unit, offset),
+        match self.units.resolve(unit, value.clone())? {
+            Some(Reference::Local(offset)) => self.type_at(unit, offset),
+            Some(Reference::Remote(target, offset)) => {
+                self.type_at(self.units.unit_ref(&target), offset)
+            }
             None => {
                 tracing::warn!(?value, "unsupported type reference");
                 Ok(Type::Base(Base::Void))
@@ -653,7 +658,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     }
 
     /// Returns the type defined by the DIE at `offset` in `unit`.
-    fn type_at(&self, unit: UnitRef<'u, Reader<'data>>, offset: UnitOffset) -> Result<Type, Error> {
+    fn type_at(&self, unit: UnitRef<'_, Reader<'data>>, offset: UnitOffset) -> Result<Type, Error> {
         let mut tree = unit.entries_tree(Some(offset))?;
         let node = tree.root()?;
         let entry = node.entry();
@@ -713,7 +718,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     /// Returns the array type described by `node` and its subranges.
     fn array_type(
         &self,
-        unit: UnitRef<'u, Reader<'data>>,
+        unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<Array, Error> {
         debug_assert_eq!(node.entry().tag(), gimli::DW_TAG_array_type);

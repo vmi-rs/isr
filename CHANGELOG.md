@@ -50,7 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `dl-macos` feature, `isr::download::macos` module and `macos` example.
 - `schema::Segment` and the `Segment` view with `Profile::segments`,
   `Profile::find_segment` and `Profile::segment_containing`.
-- `isr_dwarf::units::DwarfUnits`, `symbols::MachOSymbols`,
+- `isr_dwarf::units::DwarfUnits`, which keeps only unit headers and parses
+  units on demand, `units::Reference`, `symbols::MachOSymbols`,
   `segments::MachOSegments`, and `Error::UnsupportedFormat` /
   `Error::MissingArm64Slice`.
 
