@@ -5,8 +5,8 @@ pub mod visit;
 
 use crate::schema::{
     ArchivedArchitecture, ArchivedArray, ArchivedBase, ArchivedBitfield, ArchivedEnum,
-    ArchivedEnumRef, ArchivedField, ArchivedPointer, ArchivedProfile, ArchivedStruct,
-    ArchivedStructKind, ArchivedStructRef, ArchivedType, ArchivedVariant,
+    ArchivedEnumRef, ArchivedField, ArchivedPointer, ArchivedProfile, ArchivedSegment,
+    ArchivedStruct, ArchivedStructKind, ArchivedStructRef, ArchivedType, ArchivedVariant,
 };
 
 /// A typed view over an archived profile.
@@ -23,6 +23,36 @@ pub struct Symbol<'a> {
 
     /// Relative virtual address from the module base.
     pub rva: u64,
+}
+
+/// A named image segment.
+#[derive(Debug, Clone, Copy)]
+pub struct Segment<'a> {
+    /// Segment name.
+    pub name: &'a str,
+
+    /// Start address of the segment, using the same base as symbol values.
+    pub address: u64,
+
+    /// Size of the segment in bytes.
+    pub size: u64,
+}
+
+impl<'a> Segment<'a> {
+    fn from_archived(name: &'a str, inner: &ArchivedSegment) -> Self {
+        Self {
+            name,
+            address: inner.address.into(),
+            size: inner.size.into(),
+        }
+    }
+
+    /// Returns `true` if `address` lies within `[address, address + size)`.
+    pub fn contains(&self, address: u64) -> bool {
+        address
+            .checked_sub(self.address)
+            .is_some_and(|delta| delta < self.size)
+    }
 }
 
 impl<'a> Profile<'a> {
@@ -72,6 +102,15 @@ impl<'a> Profile<'a> {
             rva: rva.into(),
         })
     }
+
+    /// Returns the segments in profile order.
+    pub fn segments(&self) -> impl ExactSizeIterator<Item = Segment<'a>> {
+        self.inner
+            .segments
+            .iter()
+            .map(|(name, inner)| Segment::from_archived(name.as_ref(), inner))
+    }
+
     /// Returns the size of a given type in bytes.
     pub fn type_size(&self, ty: Type<'a>) -> Option<u64> {
         match ty {
@@ -132,6 +171,19 @@ impl<'a> Profile<'a> {
     /// Finds a symbol by name.
     pub fn find_symbol(&self, symbol_name: &str) -> Option<u64> {
         self.inner.symbols.get(symbol_name).map(Into::into)
+    }
+
+    /// Finds a segment by name.
+    pub fn find_segment(&self, segment_name: &str) -> Option<Segment<'a>> {
+        self.inner
+            .segments
+            .get_key_value(segment_name)
+            .map(|(name, inner)| Segment::from_archived(name.as_ref(), inner))
+    }
+
+    /// Returns the first non-empty segment containing `address`.
+    pub fn segment_containing(&self, address: u64) -> Option<Segment<'a>> {
+        self.segments().find(|segment| segment.contains(address))
     }
 
     /// Returns the symbol whose RVA is closest to `rva` without exceeding it.
@@ -527,5 +579,82 @@ impl<'a> Pointer<'a> {
     /// Returns the size of the pointer in bytes.
     pub fn size(&self) -> u64 {
         self.inner.size.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexMap;
+    use rkyv::util::AlignedVec;
+
+    use super::Profile;
+    use crate::schema::{self, ArchivedProfile};
+
+    /// Serializes a profile with the given segments into an rkyv buffer.
+    fn archive(segments: &[(&str, u64, u64)]) -> AlignedVec {
+        let profile = schema::Profile {
+            segments: segments
+                .iter()
+                .map(|&(name, address, size)| (name.to_owned(), schema::Segment { address, size }))
+                .collect::<IndexMap<_, _>>(),
+            ..Default::default()
+        };
+
+        rkyv::to_bytes::<rkyv::rancor::Error>(&profile).expect("serialize profile")
+    }
+
+    /// Returns a typed view over an rkyv buffer produced by [`archive`].
+    fn view(bytes: &AlignedVec) -> Profile<'_> {
+        let archived =
+            rkyv::access::<ArchivedProfile, rkyv::rancor::Error>(bytes).expect("access profile");
+        Profile::from_archived(archived)
+    }
+
+    #[test]
+    fn segment_containing_respects_half_open_bounds() {
+        let bytes = archive(&[("__TEXT", 0x1000, 0x1000), ("__DATA", 0x2000, 0x800)]);
+        let profile = view(&bytes);
+
+        assert!(profile.segment_containing(0xfff).is_none());
+        assert_eq!(profile.segment_containing(0x1000).unwrap().name, "__TEXT");
+        assert_eq!(profile.segment_containing(0x1fff).unwrap().name, "__TEXT");
+        assert_eq!(profile.segment_containing(0x2000).unwrap().name, "__DATA");
+        assert_eq!(profile.segment_containing(0x27ff).unwrap().name, "__DATA");
+        assert!(profile.segment_containing(0x2800).is_none());
+    }
+
+    #[test]
+    fn segment_containing_ignores_empty_segments() {
+        let bytes = archive(&[("__EMPTY", 0x1000, 0), ("__TEXT", 0x1000, 0x10)]);
+        let profile = view(&bytes);
+
+        assert_eq!(profile.segment_containing(0x1000).unwrap().name, "__TEXT");
+        assert_eq!(profile.find_segment("__EMPTY").unwrap().size, 0);
+    }
+
+    #[test]
+    fn segment_containing_handles_top_of_address_space() {
+        let bytes = archive(&[("__LAST", u64::MAX - 0xf, 0x10)]);
+        let profile = view(&bytes);
+
+        assert_eq!(profile.segment_containing(u64::MAX).unwrap().name, "__LAST");
+        assert!(profile.segment_containing(0).is_none());
+    }
+
+    #[test]
+    fn find_segment_returns_named_segment() {
+        let bytes = archive(&[("__TEXT", 0x1000, 0x1000), ("__DATA", 0x2000, 0x800)]);
+        let profile = view(&bytes);
+
+        let data = profile.find_segment("__DATA").unwrap();
+        assert_eq!((data.address, data.size), (0x2000, 0x800));
+        assert!(profile.find_segment("__LINKEDIT").is_none());
+        assert_eq!(
+            profile
+                .segments()
+                .map(|segment| segment.name)
+                .collect::<Vec<_>>(),
+            ["__TEXT", "__DATA"]
+        );
     }
 }

@@ -6,7 +6,7 @@
 use indexmap::IndexMap;
 use rkyv::{Archive, Deserialize, Serialize};
 
-/// A full profile: architecture, type definitions, and symbols.
+/// A full profile: architecture, type definitions, symbols, and segments.
 #[derive(Debug, Default, Archive, Serialize, Deserialize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[rkyv(derive(Debug))]
@@ -22,6 +22,25 @@ pub struct Profile {
 
     /// Symbol RVAs keyed by symbol name.
     pub symbols: IndexMap<String, u64>,
+
+    /// Image segments keyed by segment name.
+    ///
+    /// Profiles generated from formats without a segment table leave this
+    /// map empty.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub segments: IndexMap<String, Segment>,
+}
+
+/// Image segment.
+#[derive(Debug, Archive, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[rkyv(derive(Debug))]
+pub struct Segment {
+    /// Start address of the segment, using the same base as symbol values.
+    pub address: u64,
+
+    /// Size of the segment in bytes.
+    pub size: u64,
 }
 
 /// Target CPU architecture.

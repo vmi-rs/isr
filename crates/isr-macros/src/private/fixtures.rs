@@ -226,6 +226,7 @@ fn build_ntkrnlmp_subset() -> OwnedProfile {
         enums: IndexMap::new(),
         structs,
         symbols,
+        segments: IndexMap::new(),
     }
 }
 
