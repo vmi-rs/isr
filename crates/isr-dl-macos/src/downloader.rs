@@ -1,3 +1,5 @@
+//! Kernel Debug Kit lookup, download and extraction.
+
 use std::{
     cell::OnceCell,
     path::{Path, PathBuf},
@@ -79,7 +81,9 @@ pub struct KdkSymbolDownloader {
     progress: Option<ProgressFn>,
 
     /// Maximum age of the cached manifest before re-fetching.
-    /// `Duration::ZERO` always re-fetches; `Duration::MAX` always uses cache.
+    ///
+    /// `Duration::ZERO` always re-fetches. `Duration::MAX` always uses the
+    /// cached manifest.
     #[builder(default = Duration::from_secs(24 * 3600))]
     index_max_age: Duration,
 }

@@ -60,6 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Returns a progress callback that renders download and extraction progress
+/// bars.
 fn indicatif_progress() -> impl Fn(ProgressEvent<'_>) + Send + Sync + 'static {
     let multi = MultiProgress::new();
     let bars = Mutex::new(HashMap::<String, ProgressBar>::new());
@@ -107,6 +109,8 @@ fn indicatif_progress() -> impl Fn(ProgressEvent<'_>) + Send + Sync + 'static {
     }
 }
 
+/// Creates a progress bar for `total_bytes`, or a spinner when the size is
+/// unknown.
 fn new_bar(style: &ProgressStyle, total_bytes: Option<u64>) -> ProgressBar {
     match total_bytes {
         Some(total_bytes) => ProgressBar::new(total_bytes).with_style(style.clone()),
@@ -114,6 +118,7 @@ fn new_bar(style: &ProgressStyle, total_bytes: Option<u64>) -> ProgressBar {
     }
 }
 
+/// Returns the last component of a URL or path.
 fn basename(s: &str) -> &str {
     s.rsplit_once(['/', '\\']).map_or(s, |(_, rest)| rest)
 }

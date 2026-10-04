@@ -1,3 +1,5 @@
+//! Downloader error type.
+
 use dpp::{DppError, pbzx::PbzxError, xara::XarError};
 
 /// Errors surfaced while resolving macOS Kernel Debug Kits.

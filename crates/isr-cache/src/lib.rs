@@ -174,6 +174,7 @@ pub struct IsrCache {
     #[cfg(feature = "windows")]
     symbol_downloader: OnceCell<SymbolDownloader>,
 
+    /// Lazily created downloader for macOS Kernel Debug Kits.
     #[cfg(feature = "macos")]
     kdk_downloader: OnceCell<KdkSymbolDownloader>,
 
@@ -597,8 +598,9 @@ fn format_uuid(uuid: &[u8; 16]) -> String {
 
 /// Runs `f` against a sibling `.part` file, then renames it over `dest`.
 ///
-/// An existing profile is reused only if it passes archive validation;
-/// otherwise (e.g. written by an older schema) it is deleted and rebuilt.
+/// An existing profile is reused only if it passes archive validation. A
+/// profile that fails validation, for example one written by an older
+/// schema, is deleted and rebuilt.
 #[allow(unused)]
 fn with_part_file<F>(profile_path: PathBuf, f: F) -> Result<Entry, Error>
 where

@@ -39,6 +39,7 @@ pub struct Segment<'a> {
 }
 
 impl<'a> Segment<'a> {
+    /// Creates a segment view named `name` from its archived representation.
     fn from_archived(name: &'a str, inner: &ArchivedSegment) -> Self {
         Self {
             name,

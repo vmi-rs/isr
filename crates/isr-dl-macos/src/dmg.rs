@@ -1,3 +1,5 @@
+//! Kernel Debug Kit disk image extraction and SHA-256 verification.
+
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},

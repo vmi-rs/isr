@@ -1,3 +1,5 @@
+//! XNU kernel version string parsing.
+
 use std::str::FromStr;
 
 use crate::DownloaderError;

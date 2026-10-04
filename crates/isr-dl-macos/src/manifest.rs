@@ -1,3 +1,5 @@
+//! Dortania `KdkSupportPkg` manifest parsing and kernel version lookup.
+
 use indexmap::IndexMap;
 use serde::Deserialize;
 
