@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names.
 - **Breaking:** `isr_cache::Error` is now `#[non_exhaustive]`. Its
   `Downloader` and `Dwarf` variants are also enabled by the `macos` feature.
+- **Breaking:** `isr_dwarf::Error` is now `#[non_exhaustive]` and has the new
+  `UnsupportedFormat` and `MissingArm64Slice` variants.
 - `IsrCache` deletes and rebuilds a cached `profile.isr` that fails
   validation, for example one written with an older schema, instead of
   returning it.
@@ -51,9 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `schema::Segment` and the `Segment` view with `Profile::segments`,
   `Profile::find_segment` and `Profile::segment_containing`.
 - `isr_dwarf::units::DwarfUnits`, which keeps only unit headers and parses
-  units on demand, `units::Reference`, `symbols::MachOSymbols`,
-  `segments::MachOSegments`, and `Error::UnsupportedFormat` /
-  `Error::MissingArm64Slice`.
+  units on demand, `units::Reference`, `symbols::MachOSymbols` and
+  `segments::MachOSegments`.
 
 ### Removed
 

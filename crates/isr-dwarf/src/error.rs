@@ -1,5 +1,6 @@
 /// Errors surfaced while building a profile from DWARF debug info.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// I/O error while reading the kernel image, dSYM or `System.map`.
     #[error(transparent)]
