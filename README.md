@@ -8,8 +8,8 @@
 
 The `isr` crate provides a unified, version-agnostic way to access and
 utilize debugging symbols from various sources, including PDB files
-(Windows) and DWARF debug info (Linux). This allows developers to write
-code that interacts with different operating system versions without
+(Windows) and DWARF debug info (Linux and macOS). This allows developers to
+write code that interacts with different operating system versions without
 needing to hardcode offsets or constantly update for new releases.
 
 ## Features
