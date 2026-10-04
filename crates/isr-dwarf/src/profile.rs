@@ -21,7 +21,7 @@ where
     let object = object::File::parse(&*kernel_mmap)?;
 
     let mut profile = Profile {
-        architecture: Architecture::Amd64,
+        architecture: architecture(&object),
         ..Default::default()
     };
 
@@ -55,4 +55,21 @@ fn add_types(profile: &mut Profile, object: &object::File<'_>) -> Result<(), Err
     profile.add_types(&units)?;
 
     Ok(())
+}
+
+/// Returns the profile architecture of `object`.
+fn architecture(object: &object::File<'_>) -> Architecture {
+    match object.architecture() {
+        object::Architecture::I386 => Architecture::X86,
+        object::Architecture::X86_64 => Architecture::Amd64,
+        object::Architecture::Arm => Architecture::Arm32,
+        object::Architecture::Aarch64 => Architecture::Arm64,
+        architecture => {
+            tracing::warn!(
+                ?architecture,
+                "unsupported architecture, defaulting to unknown architecture"
+            );
+            Architecture::Unknown
+        }
+    }
 }
