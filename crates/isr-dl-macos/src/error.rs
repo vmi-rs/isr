@@ -51,6 +51,10 @@ pub enum DownloaderError {
     #[error("kernel `{0}` or its dSYM not found in the package payload")]
     KernelFilesNotFound(String),
 
+    /// The extracted kernel does not embed the requested version string.
+    #[error("extracted kernel does not match the requested version")]
+    KernelVersionMismatch,
+
     /// The package payload is not a valid odc cpio archive.
     #[error("invalid cpio archive: {0}")]
     InvalidCpio(&'static str),

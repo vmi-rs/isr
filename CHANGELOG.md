@@ -28,9 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `isr-dl-macos` crate with `DarwinVersion` parsing and a
     `KdkSymbolDownloader` for Apple Kernel Debug Kits. The downloader resolves
     the kernel version string through the Dortania KdkSupportPkg manifest,
-    verifies the SHA-256 of downloaded DMGs, finds installed `*.kdk` bundles,
-    extracts from local DMGs, and streams DMG -> PKG -> PBZX -> cpio
-    extraction with bounded memory.
+    verifies the SHA-256 of downloaded and local DMGs, finds installed
+    `*.kdk` bundles, extracts from local DMGs, rejects extracted kernels that
+    do not embed the requested version string, and streams
+    DMG -> PKG -> PBZX -> cpio extraction with bounded memory.
   - `isr_dwarf::create_profile_from_dsym`, which builds a profile from a
     Mach-O dSYM: DWARF types, Mach-O symbols with one leading underscore
     stripped, and `LC_SEGMENT_64` segments. A universal binary uses its arm64

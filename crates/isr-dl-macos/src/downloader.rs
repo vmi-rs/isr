@@ -116,6 +116,11 @@ impl KdkSymbolDownloader {
     /// The KDK build is taken from the cached manifest, or from the
     /// `_build_<build>.dmg` suffix of the disk image file name. Never touches
     /// the network.
+    ///
+    /// Before extraction, the disk image is verified against the SHA-256 of
+    /// the manifest entry when one is listed. Extracted files whose kernel
+    /// does not embed `version` are removed and rejected with
+    /// [`DownloaderError::KernelVersionMismatch`].
     pub fn extract_from_dmg(
         &self,
         version: &DarwinVersion,
@@ -180,17 +185,34 @@ impl KdkSymbolDownloader {
             .as_ref()
             .and_then(|manifest| manifest.resolve(version));
 
-        let (build, kernel_name) = match found {
-            Some(found) => (found.entry.build.clone(), found.kernel_name.to_owned()),
+        let (build, kernel_name, sha256sum) = match found {
+            Some(found) => (
+                found.entry.build.clone(),
+                found.kernel_name.to_owned(),
+                found.entry.sha256sum.as_deref(),
+            ),
             None => match build_from_dmg_name(dmg_path) {
-                Some(build) => (build, version.kernel_name()),
+                Some(build) => (build, version.kernel_name(), None),
                 None => return Err(DownloaderError::UnknownBuild),
             },
         };
 
         let mut paths = self.paths(&build, &kernel_name);
         if !paths.kernel.exists() || !paths.dsym.exists() {
+            if let Some(sha256sum) = sha256sum {
+                verify_sha256(dmg_path, sha256sum)?;
+            }
+
             self.extract(&paths, dmg_path)?;
+
+            if !file_contains(&paths.kernel, version.original.as_bytes()) {
+                std::fs::remove_file(&paths.kernel)?;
+                std::fs::remove_dir_all(dsym_bundle_path(
+                    &paths.output_directory,
+                    &paths.kernel_name,
+                ))?;
+                return Err(DownloaderError::KernelVersionMismatch);
+            }
         }
 
         paths.dmg = Some(dmg_path.to_owned());
@@ -332,11 +354,15 @@ impl KdkSymbolDownloader {
     }
 }
 
+/// Returns the dSYM bundle directory of `kernel_name` in `directory`.
+fn dsym_bundle_path(directory: &Path, kernel_name: &str) -> PathBuf {
+    directory.join(format!("{kernel_name}.dSYM"))
+}
+
 /// Returns the DWARF path inside the dSYM bundle of `kernel_name` in
 /// `directory`.
 fn dsym_path(directory: &Path, kernel_name: &str) -> PathBuf {
-    directory
-        .join(format!("{kernel_name}.dSYM"))
+    dsym_bundle_path(directory, kernel_name)
         .join("Contents")
         .join("Resources")
         .join("DWARF")
@@ -573,5 +599,30 @@ mod tests {
         server.join().unwrap();
         assert_eq!(paths.build, "26A434");
         assert_eq!(paths.output_directory, out.join("26A434"));
+    }
+
+    #[test]
+    fn rejects_local_disk_image_with_wrong_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        let expected = "0".repeat(64);
+        std::fs::create_dir_all(out.join("_index")).unwrap();
+        std::fs::write(
+            out.join("_index").join("manifest.json"),
+            manifest_json("26A434", &expected),
+        )
+        .unwrap();
+        let dmg_path = dir.path().join("kdk.dmg");
+        std::fs::write(&dmg_path, b"not a disk image").unwrap();
+
+        let version = VERSION.parse::<DarwinVersion>().unwrap();
+        let downloader = downloader(&out, &dir.path().join("none"));
+        let err = downloader
+            .extract_from_dmg_inner(&version, &dmg_path)
+            .unwrap_err();
+        assert!(
+            matches!(err, DownloaderError::ChecksumMismatch { expected: digest, .. } if digest == expected)
+        );
+        assert!(!out.join("26A434").join("kernel.release.vmapple").exists());
     }
 }
