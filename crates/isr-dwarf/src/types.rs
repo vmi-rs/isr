@@ -30,6 +30,10 @@ pub trait DwarfTypes<'data> {
     /// Definitions nested inside other structs, unions and classes are added
     /// as well. Copies of the same definition emitted into several units are
     /// added once, and anonymous copies resolve to the name of the added copy.
+    ///
+    /// In C++ units, types declared inside a class or namespace are named
+    /// with their qualified scope, for example `Outer::Nested`. Types of
+    /// other units keep their unqualified name.
     fn add_types(&mut self, units: &DwarfUnits<'data>) -> Result<(), Error>;
 }
 
@@ -44,6 +48,7 @@ impl<'data> DwarfTypes<'data> for Profile {
         let collector = TypeCollector {
             units,
             duplicates: index.duplicates,
+            qualified_names: index.qualified_names,
         };
 
         for (unit_index, unit) in units.iter().enumerate() {
@@ -68,6 +73,48 @@ fn struct_kind(tag: DwTag) -> Option<StructKind> {
 /// Returns `true` for tags of type definitions added to the profile.
 fn is_definition_tag(tag: DwTag) -> bool {
     tag == gimli::DW_TAG_enumeration_type || struct_kind(tag).is_some()
+}
+
+/// Returns `true` if the unit root `entry` declares a C++ dialect.
+///
+/// Nested types of C++ units live in the scope of their parent, while C
+/// nested struct tags live in file scope.
+fn is_cplusplus(entry: &DebuggingInformationEntry<Reader<'_>>) -> bool {
+    matches!(
+        entry.attr_value(gimli::DW_AT_language),
+        Some(AttributeValue::Language(
+            gimli::DW_LANG_C_plus_plus
+                | gimli::DW_LANG_C_plus_plus_03
+                | gimli::DW_LANG_C_plus_plus_11
+                | gimli::DW_LANG_C_plus_plus_14
+                | gimli::DW_LANG_C_plus_plus_17
+                | gimli::DW_LANG_C_plus_plus_20
+                | gimli::DW_LANG_ObjC_plus_plus
+        ))
+    )
+}
+
+/// Returns the scope name of a `DW_TAG_namespace` entry.
+///
+/// Anonymous namespaces are named like Clang and LLDB print them.
+fn namespace_name<'data>(
+    unit: UnitRef<'_, Reader<'data>>,
+    entry: &DebuggingInformationEntry<Reader<'data>>,
+) -> Result<String, Error> {
+    match entry.name(&unit)? {
+        Some(name) => Ok(name),
+        None => Ok(String::from("(anonymous namespace)")),
+    }
+}
+
+/// Returns `name` qualified with the C++ `scope` it is declared in.
+fn qualify(scope: &str, name: &str) -> String {
+    if scope.is_empty() {
+        name.to_owned()
+    }
+    else {
+        format!("{scope}::{name}")
+    }
 }
 
 /// Returns the offset of `entry` within its section.
@@ -107,10 +154,25 @@ fn enum_subtype(byte_size: Option<u64>, signed: bool) -> Base {
 /// same definition share this key, which lets only the first copy be added.
 #[derive(PartialEq, Eq, Hash)]
 struct DeclKey {
+    /// DWARF tag of the definition.
     tag: DwTag,
+
+    /// Qualified name of the enclosing C++ scope.
+    ///
+    /// Empty for types declared at file scope and for every type of a non-C++
+    /// unit. Keeps same-named nested types of different parents apart.
+    scope: String,
+
+    /// Unqualified name, `None` for anonymous types.
     name: Option<String>,
+
+    /// Path of the declaring source file.
     file: String,
+
+    /// Line of the declaration in `file`.
     line: u64,
+
+    /// Column of the declaration, if the compiler emits it.
     column: Option<u64>,
 
     /// Member or enumerator names and offsets of an anonymous type.
@@ -129,6 +191,13 @@ struct DeclIndex {
 
     /// Section offset of every later copy, mapped to the offset of the first.
     duplicates: HashMap<usize, usize>,
+
+    /// Qualified names of named types declared inside a C++ class or
+    /// namespace, keyed by section offset.
+    ///
+    /// Covers declarations as well as definitions, so references to either
+    /// resolve to the same name.
+    qualified_names: HashMap<usize, String>,
 }
 
 impl DeclIndex {
@@ -136,15 +205,37 @@ impl DeclIndex {
     /// [`TypeCollector::add_unit`].
     fn add_unit<'data>(&mut self, unit: UnitRef<'_, Reader<'data>>) -> Result<(), Error> {
         let mut tree = unit.entries_tree(None)?;
-        let mut children = tree.root()?.children();
+        let root = tree.root()?;
+        let cplusplus = is_cplusplus(root.entry());
+        self.add_scope(unit, root, "", cplusplus)
+    }
+
+    /// Indexes the definitions declared directly in the unit or namespace
+    /// `node`, whose qualified name is `scope`.
+    fn add_scope<'data>(
+        &mut self,
+        unit: UnitRef<'_, Reader<'data>>,
+        node: EntriesTreeNode<'_, '_, Reader<'data>>,
+        scope: &str,
+        cplusplus: bool,
+    ) -> Result<(), Error> {
+        let mut children = node.children();
         while let Some(child) = children.next()? {
-            self.add_definition(unit, child)?;
+            let tag = child.entry().tag();
+            if is_definition_tag(tag) {
+                self.add_definition(unit, child, scope, cplusplus)?;
+            }
+            else if tag == gimli::DW_TAG_namespace && cplusplus {
+                let name = namespace_name(unit, child.entry())?;
+                self.add_scope(unit, child, &qualify(scope, &name), cplusplus)?;
+            }
         }
 
         Ok(())
     }
 
-    /// Indexes a definition and the definitions nested inside it.
+    /// Indexes a definition declared in `scope` and the definitions nested
+    /// inside it.
     ///
     /// Nested definitions are indexed even when `node` is a declaration or a
     /// duplicate, because compilers emit C++ nested types lazily and only
@@ -153,13 +244,11 @@ impl DeclIndex {
         &mut self,
         unit: UnitRef<'_, Reader<'data>>,
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
+        scope: &str,
+        cplusplus: bool,
     ) -> Result<(), Error> {
         let entry = node.entry();
         let tag = entry.tag();
-        if !is_definition_tag(tag) {
-            return Ok(());
-        }
-
         let offset = section_offset(unit, entry);
         let name = entry.name(&unit)?;
         let declaration = entry.declaration()?.unwrap_or(false);
@@ -173,6 +262,19 @@ impl DeclIndex {
         let line = entry.decl_line()?;
         let column = entry.decl_column()?;
 
+        // Anonymous types do not open a scope of their own.
+        let nested_scope = match &name {
+            Some(name) if cplusplus => {
+                let qualified_name = qualify(scope, name);
+                if !scope.is_empty() {
+                    self.qualified_names.insert(offset, qualified_name.clone());
+                }
+
+                qualified_name
+            }
+            _ => scope.to_owned(),
+        };
+
         let mut layout = Vec::new();
         let mut children = node.children();
         while let Some(child) = children.next()? {
@@ -185,7 +287,9 @@ impl DeclIndex {
                     };
                     layout.push((child_entry.name(&unit)?, location));
                 }
-                child_tag if is_definition_tag(child_tag) => self.add_definition(unit, child)?,
+                child_tag if is_definition_tag(child_tag) => {
+                    self.add_definition(unit, child, &nested_scope, cplusplus)?;
+                }
                 _ => (),
             }
         }
@@ -204,6 +308,7 @@ impl DeclIndex {
 
         let key = DeclKey {
             tag,
+            scope: scope.to_owned(),
             name,
             file,
             line,
@@ -226,11 +331,16 @@ impl DeclIndex {
 
 /// Second pass over all units that converts definitions into profile types.
 struct TypeCollector<'u, 'data> {
+    /// Units resolving cross-unit type references.
     units: &'u DwarfUnits<'data>,
 
     /// Section offsets of skipped copies, mapped to the offset of the copy
     /// added to the profile.
     duplicates: HashMap<usize, usize>,
+
+    /// Qualified names of C++ types declared inside a class or namespace,
+    /// keyed by section offset.
+    qualified_names: HashMap<usize, String>,
 }
 
 impl<'u, 'data> TypeCollector<'u, 'data> {
@@ -241,9 +351,29 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
         unit: UnitRef<'u, Reader<'data>>,
     ) -> Result<(), Error> {
         let mut tree = unit.entries_tree(None)?;
-        let mut children = tree.root()?.children();
+        let root = tree.root()?;
+        let cplusplus = is_cplusplus(root.entry());
+        self.add_scope(profile, unit, root, cplusplus)
+    }
+
+    /// Adds the definitions declared directly in the unit or namespace
+    /// `node`.
+    fn add_scope(
+        &self,
+        profile: &mut Profile,
+        unit: UnitRef<'u, Reader<'data>>,
+        node: EntriesTreeNode<'_, '_, Reader<'data>>,
+        cplusplus: bool,
+    ) -> Result<(), Error> {
+        let mut children = node.children();
         while let Some(child) = children.next()? {
-            self.add_definition(profile, unit, child)?;
+            let tag = child.entry().tag();
+            if is_definition_tag(tag) {
+                self.add_definition(profile, unit, child)?;
+            }
+            else if tag == gimli::DW_TAG_namespace && cplusplus {
+                self.add_scope(profile, unit, child, cplusplus)?;
+            }
         }
 
         Ok(())
@@ -262,10 +392,6 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<(), Error> {
         let entry = node.entry();
-        if !is_definition_tag(entry.tag()) {
-            return Ok(());
-        }
-
         if entry.declaration()?.unwrap_or(false)
             || self.duplicates.contains_key(&section_offset(unit, entry))
         {
@@ -287,25 +413,32 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     ) -> Result<(), Error> {
         let mut children = node.children();
         while let Some(child) = children.next()? {
-            self.add_definition(profile, unit, child)?;
+            if is_definition_tag(child.entry().tag()) {
+                self.add_definition(profile, unit, child)?;
+            }
         }
 
         Ok(())
     }
 
-    /// Returns the profile name of a type definition.
+    /// Returns the profile name of a type definition or declaration.
     ///
-    /// Anonymous types are named after the section offset of the copy added
-    /// to the profile.
+    /// C++ types declared inside a class or namespace are named with their
+    /// qualified scope. Anonymous types are named after the section offset
+    /// of the copy added to the profile.
     fn type_name(
         &self,
         unit: UnitRef<'_, Reader<'data>>,
         entry: &DebuggingInformationEntry<Reader<'data>>,
     ) -> Result<String, Error> {
+        let offset = section_offset(unit, entry);
+        if let Some(qualified_name) = self.qualified_names.get(&offset) {
+            return Ok(qualified_name.clone());
+        }
+
         match entry.name(&unit)? {
             Some(name) => Ok(name),
             None => {
-                let offset = section_offset(unit, entry);
                 let offset = match self.duplicates.get(&offset) {
                     Some(&canonical) => canonical,
                     None => offset,

@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from earlier versions no longer validate.
 - **Breaking:** `isr_dwarf::types::DwarfTypes::add` and `DwarfCache` are
   replaced by `DwarfTypes::add_types`, which takes a `units::DwarfUnits` index.
+- **Breaking:** DWARF profiles name types declared inside a C++ class or
+  namespace with their qualified scope, for example
+  `IOService::ExpansionData`, so same-named nested types of different classes
+  no longer merge into one struct. Types of C units keep their unqualified
+  names.
 - **Breaking:** `isr_cache::Error` is now `#[non_exhaustive]`. Its
   `Downloader` and `Dwarf` variants are also enabled by the `macos` feature.
 - `IsrCache` deletes and rebuilds a cached `profile.isr` that fails

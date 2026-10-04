@@ -53,7 +53,7 @@ fn cross_unit_references_resolve_in_owning_unit() {
 
         let two_only = &profile.structs["TwoOnly"];
         assert_eq!(struct_name(&two_only.fields["s"].ty), "Shared");
-        assert_eq!(struct_name(&two_only.fields["inner"].ty), "Inner");
+        assert_eq!(struct_name(&two_only.fields["inner"].ty), "Shared::Inner");
         assert_eq!(two_only.fields["inner"].offset, 32);
         assert!(matches!(two_only.fields["y"].ty, Type::Base(Base::I64)));
     });
@@ -85,7 +85,7 @@ fn pointers_and_references_default_to_address_size() {
 #[test]
 fn nested_definitions_are_added() {
     with_cross_unit_profile(|profile| {
-        let inner = &profile.structs["Inner"];
+        let inner = &profile.structs["Shared::Inner"];
         assert_eq!(inner.size, 16);
         assert_eq!(inner.fields["a"].offset, 0);
         assert_eq!(inner.fields["b"].offset, 8);

@@ -54,23 +54,68 @@ fn struct_name(ty: &Type) -> &str {
 #[test]
 fn nested_definition_inside_declaration_is_added() {
     with_nested_scope_profile(|profile| {
-        let detail = &profile.structs["Detail"];
+        let detail = &profile.structs["Lazy::Detail"];
         assert_eq!(detail.size, 8);
         assert_eq!(detail.fields["d2"].offset, 4);
 
         let uses_nested = &profile.structs["UsesNested"];
-        assert_eq!(struct_name(&uses_nested.fields["detail"].ty), "Detail");
+        assert_eq!(
+            struct_name(&uses_nested.fields["detail"].ty),
+            "Lazy::Detail"
+        );
     });
 }
 
 #[test]
 fn nested_definition_inside_duplicate_is_added() {
     with_nested_scope_profile(|profile| {
-        let hidden = &profile.structs["Hidden"];
+        let hidden = &profile.structs["Dup::Hidden"];
         assert_eq!(hidden.size, 8);
         assert!(matches!(hidden.fields["h"].ty, Type::Base(Base::I64)));
 
         let uses_nested = &profile.structs["UsesNested"];
-        assert_eq!(struct_name(&uses_nested.fields["hidden"].ty), "Hidden");
+        assert_eq!(struct_name(&uses_nested.fields["hidden"].ty), "Dup::Hidden");
+    });
+}
+
+#[test]
+fn same_named_nested_types_keep_their_parents() {
+    with_nested_scope_profile(|profile| {
+        assert!(!profile.structs.contains_key("ExpansionData"));
+        assert_eq!(profile.structs["Alpha::ExpansionData"].size, 4);
+        assert_eq!(profile.structs["Beta::ExpansionData"].size, 16);
+
+        let alpha = &profile.structs["Alpha"];
+        let beta = &profile.structs["Beta"];
+        assert_eq!(
+            struct_name(&alpha.fields["reserved"].ty),
+            "Alpha::ExpansionData"
+        );
+        assert_eq!(
+            struct_name(&beta.fields["reserved"].ty),
+            "Beta::ExpansionData"
+        );
+    });
+}
+
+#[test]
+fn namespaces_qualify_type_names() {
+    with_nested_scope_profile(|profile| {
+        let scoped = &profile.structs["ns::Scoped"];
+        assert_eq!(struct_name(&scoped.fields["leaf"].ty), "ns::Scoped::Leaf");
+        assert_eq!(profile.structs["ns::Scoped::Leaf"].size, 2);
+
+        let uses_nested = &profile.structs["UsesNested"];
+        assert_eq!(struct_name(&uses_nested.fields["scoped"].ty), "ns::Scoped");
+    });
+}
+
+#[test]
+fn c_nested_types_keep_file_scope_names() {
+    with_nested_scope_profile(|profile| {
+        let outer = &profile.structs["COuter"];
+        assert_eq!(struct_name(&outer.fields["inner"].ty), "CInner");
+        assert_eq!(profile.structs["CInner"].size, 4);
+        assert!(!profile.structs.contains_key("COuter::CInner"));
     });
 }
