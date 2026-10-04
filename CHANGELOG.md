@@ -9,11 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `schema::Profile` has a new `segments` field holding the image
+  segment table. Struct literals must initialize it, and archived profiles
+  from earlier versions no longer validate.
+- **Breaking:** `isr_dwarf::types::DwarfTypes::add` and `DwarfCache` are
+  replaced by `DwarfTypes::add_types`, which takes a `units::DwarfUnits` index.
+- **Breaking:** `isr_cache::Error` is now `#[non_exhaustive]`. Its
+  `Downloader` and `Dwarf` variants are also enabled by the `macos` feature.
+- `IsrCache` deletes and rebuilds a cached `profile.isr` that fails
+  validation, for example one written with an older schema, instead of
+  returning it.
+- DWARF profiles take their architecture from the object file instead of
+  always reporting `Amd64`.
+
 ### Added
+
+- macOS support:
+  - `isr-dl-macos` crate with `DarwinVersion` parsing and a
+    `KdkSymbolDownloader` for Apple Kernel Debug Kits. The downloader resolves
+    the kernel version string through the Dortania KdkSupportPkg manifest,
+    verifies the SHA-256 of downloaded DMGs, finds installed `*.kdk` bundles,
+    extracts from local DMGs, and streams DMG -> PKG -> PBZX -> cpio
+    extraction with bounded memory.
+  - `isr_dwarf::create_profile_from_dsym`, which builds a profile from a
+    Mach-O dSYM: DWARF types, Mach-O symbols with one leading underscore
+    stripped, and `LC_SEGMENT_64` segments. A universal binary uses its arm64
+    slice.
+  - `macos` feature of `isr-cache` with `with_kdk_downloader`,
+    `kdk_downloader`, `download_from_darwin_version`,
+    `entry_from_darwin_version` (with an optional `LC_UUID` check) and
+    `entry_from_dsym`, plus the `Object`, `MissingUuid` and `UuidMismatch`
+    error variants.
+  - `dl-macos` feature, `isr::download::macos` module and `macos` example.
+- `schema::Segment` and the `Segment` view with `Profile::segments`,
+  `Profile::find_segment` and `Profile::segment_containing`.
+- `isr_dwarf::units::DwarfUnits`, `symbols::MachOSymbols`,
+  `segments::MachOSegments`, and `Error::UnsupportedFormat` /
+  `Error::MissingArm64Slice`.
 
 ### Removed
 
 ### Fixed
+
+- DWARF type references through `DW_FORM_ref_addr`, emitted by dsymutil and
+  LTO for cross-unit types, no longer degrade to void.
+- Struct, union, class and enum definitions nested in other types are added
+  to the profile, so fields declared through anonymous members resolve.
+- Pointer and reference sizes default to the unit address size, and
+  restrict, atomic, immutable and ptrauth qualifiers and unspecified types
+  resolve to their underlying types.
+- DWARF types are deduplicated without `DW_AT_decl_column`, and enums without
+  `DW_AT_type` get an integer type derived from their byte size.
 
 ## [0.8.0] - 2026-09-09
 
