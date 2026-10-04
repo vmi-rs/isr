@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use gimli::{
     Attribute, AttributeValue, DebuggingInformationEntry, DwAte, Dwarf, DwarfSections, EndianSlice,
-    EntriesTree, Error, Reader as _, RelocateReader, RunTimeEndian, UnitRef,
+    Error, Reader as _, RelocateReader, RunTimeEndian, UnitRef,
 };
 
 // This is a simple wrapper around `object::read::RelocationMap` that implements
@@ -34,10 +34,6 @@ pub type Reader<'data> = RelocateReader<EndianSlice<'data, RunTimeEndian>, &'dat
 
 pub trait DebuggingInformationEntryExt<'data> {
     fn name(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
-    fn type_<'a>(
-        &self,
-        unit: &'a UnitRef<'a, Reader<'data>>,
-    ) -> Result<Option<EntriesTree<'a, Reader<'data>>>, Error>;
     fn decl_file(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
     fn decl_file_index(&self) -> Result<Option<u64>, Error>;
     fn decl_line(&self) -> Result<Option<u64>, Error>;
@@ -57,16 +53,6 @@ impl<'data> DebuggingInformationEntryExt<'data> for DebuggingInformationEntry<Re
         match self.attr(gimli::DW_AT_name).map(Attribute::value) {
             Some(name) => Ok(Some(unit.attr_string(name)?.to_string_lossy()?.to_string())),
             None => Ok(None),
-        }
-    }
-
-    fn type_<'a>(
-        &self,
-        unit: &'a UnitRef<Reader<'data>>,
-    ) -> Result<Option<EntriesTree<'a, Reader<'data>>>, Error> {
-        match self.attr(gimli::DW_AT_type).map(Attribute::value) {
-            Some(AttributeValue::UnitRef(offset)) => Ok(Some(unit.entries_tree(Some(offset))?)),
-            _ => Ok(None),
         }
     }
 

@@ -5,5 +5,6 @@ mod error;
 mod profile;
 pub mod symbols;
 pub mod types;
+pub mod units;
 
 pub use self::{error::Error, profile::create_profile};
