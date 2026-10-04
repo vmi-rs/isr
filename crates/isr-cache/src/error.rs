@@ -1,5 +1,6 @@
 /// Error type for the ISR cache.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// An I/O error occurred.
     #[error(transparent)]
@@ -15,7 +16,7 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 
     /// An error occurred while downloading a symbol file.
-    #[cfg(any(feature = "windows", feature = "linux"))]
+    #[cfg(any(feature = "windows", feature = "linux", feature = "macos"))]
     #[error(transparent)]
     Downloader(#[from] isr_dl::Error),
 
@@ -25,7 +26,28 @@ pub enum Error {
     Pdb(#[from] isr_pdb::Error),
 
     /// An error occurred while parsing DWARF symbols.
-    #[cfg(feature = "linux")]
+    #[cfg(any(feature = "linux", feature = "macos"))]
     #[error(transparent)]
     Dwarf(#[from] isr_dwarf::Error),
+
+    /// An error occurred while parsing a Mach-O file.
+    #[cfg(feature = "macos")]
+    #[error(transparent)]
+    Object(#[from] object::read::Error),
+
+    /// The dSYM has no `LC_UUID` load command.
+    #[cfg(feature = "macos")]
+    #[error("dSYM has no LC_UUID")]
+    MissingUuid,
+
+    /// The dSYM `LC_UUID` does not match the expected kernel UUID.
+    #[cfg(feature = "macos")]
+    #[error("dSYM UUID mismatch: expected {expected:02X?}, got {actual:02X?}")]
+    UuidMismatch {
+        /// Expected kernel UUID.
+        expected: [u8; 16],
+
+        /// `LC_UUID` of the dSYM, if present.
+        actual: Option<[u8; 16]>,
+    },
 }

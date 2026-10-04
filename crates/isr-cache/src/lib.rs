@@ -71,7 +71,7 @@
 
 mod error;
 
-#[cfg(any(feature = "linux", feature = "windows"))]
+#[cfg(any(feature = "linux", feature = "windows", feature = "macos"))]
 use std::cell::OnceCell;
 use std::{
     fs::File,
@@ -86,6 +86,10 @@ pub use isr_dl::{ProgressContext, ProgressEvent, ProgressFn, ProgressWriter};
 pub use isr_dl_linux::{
     ArtifactPolicy, FilenamePolicy, LinuxBanner, LinuxVersionSignature, UbuntuSymbolDownloader,
     UbuntuSymbolPaths, UbuntuSymbolRequest, UbuntuVersionSignature,
+};
+#[cfg(feature = "macos")]
+pub use isr_dl_macos::{
+    DarwinVersion, KdkManifest, KdkManifestEntry, KdkPaths, KdkSymbolDownloader,
 };
 #[cfg(feature = "windows")]
 pub use isr_dl_windows::{CodeView, ImageSignature, SymbolDownloader, SymbolRequest};
@@ -170,6 +174,9 @@ pub struct IsrCache {
     #[cfg(feature = "windows")]
     symbol_downloader: OnceCell<SymbolDownloader>,
 
+    #[cfg(feature = "macos")]
+    kdk_downloader: OnceCell<KdkSymbolDownloader>,
+
     /// The directory where cached profiles are stored.
     #[allow(unused)]
     output_directory: PathBuf,
@@ -196,6 +203,8 @@ impl IsrCache {
             ubuntu_downloader: OnceCell::new(),
             #[cfg(feature = "windows")]
             symbol_downloader: OnceCell::new(),
+            #[cfg(feature = "macos")]
+            kdk_downloader: OnceCell::new(),
 
             output_directory,
             progress: None,
@@ -438,21 +447,188 @@ impl IsrCache {
 
         Ok(image_path)
     }
+
+    /// Overrides the default [`KdkSymbolDownloader`].
+    #[cfg(feature = "macos")]
+    pub fn with_kdk_downloader(self, kdk_downloader: KdkSymbolDownloader) -> Self {
+        Self {
+            kdk_downloader: OnceCell::from(kdk_downloader),
+            ..self
+        }
+    }
+
+    /// Returns the [`KdkSymbolDownloader`], lazily initializing it.
+    #[cfg(feature = "macos")]
+    pub fn kdk_downloader(&self) -> &KdkSymbolDownloader {
+        self.kdk_downloader.get_or_init(|| {
+            KdkSymbolDownloader::builder()
+                .output_directory(self.output_directory.join("macos"))
+                .maybe_progress(self.progress.clone())
+                .build()
+        })
+    }
+
+    /// Creates or retrieves a cached profile based on an XNU kernel version
+    /// string.
+    ///
+    /// Resolves the Kernel Debug Kit for the version string, downloads and
+    /// extracts the kernel and its dSYM if not present in the cache, then
+    /// generates and stores the profile. When `uuid` is `Some`, it must match
+    /// the `LC_UUID` of the dSYM.
+    #[cfg(feature = "macos")]
+    pub fn entry_from_darwin_version(
+        &self,
+        version: &str,
+        uuid: Option<[u8; 16]>,
+    ) -> Result<Entry, Error> {
+        let paths = self.download_from_darwin_version(version)?;
+
+        if let Some(uuid) = uuid {
+            let actual = mach_uuid(&paths.dsym)?;
+            if actual != Some(uuid) {
+                return Err(Error::UuidMismatch {
+                    expected: uuid,
+                    actual,
+                });
+            }
+        }
+
+        // <cache>/macos/26A434/kernel.release.vmapple.isr
+        let profile_path = self
+            .kdk_downloader()
+            .output_directory()
+            .join(&paths.build)
+            .join(&paths.kernel_name)
+            .with_added_extension(PROFILE_FILE_EXTENSION);
+
+        create_profile_from_dsym(profile_path, &paths.dsym)
+    }
+
+    /// Creates or retrieves a cached profile from a kernel dSYM DWARF file.
+    ///
+    /// The profile is keyed by the `LC_UUID` of the dSYM.
+    #[cfg(feature = "macos")]
+    pub fn entry_from_dsym(&self, path: impl AsRef<Path>) -> Result<Entry, Error> {
+        let path = path.as_ref();
+        let uuid = match mach_uuid(path)? {
+            Some(uuid) => uuid,
+            None => return Err(Error::MissingUuid),
+        };
+
+        // <cache>/macos/uuid/D36225BA-FD41-3361-A406-B77B0E260801/profile.isr
+        let profile_path = self
+            .kdk_downloader()
+            .output_directory()
+            .join("uuid")
+            .join(format_uuid(&uuid))
+            .join("profile")
+            .with_extension(PROFILE_FILE_EXTENSION);
+
+        create_profile_from_dsym(profile_path, path)
+    }
+
+    /// Downloads and extracts the kernel and its dSYM for the given XNU
+    /// kernel version string.
+    ///
+    /// Returns a [`KdkPaths`] with the paths of the kernel files.
+    #[cfg(feature = "macos")]
+    pub fn download_from_darwin_version(&self, version: &str) -> Result<KdkPaths, Error> {
+        let version = version
+            .parse::<DarwinVersion>()
+            .map_err(isr_dl::Error::from)?;
+
+        if let Some(paths) = self.kdk_downloader().lookup(&version) {
+            tracing::debug!(path = %paths.dsym.display(), "found cached dSYM");
+            return Ok(paths);
+        }
+
+        if self.offline {
+            return Err(Error::Downloader(isr_dl::Error::ArtifactNotFound));
+        }
+
+        let paths = self.kdk_downloader().download(&version)?;
+
+        Ok(paths)
+    }
+}
+
+/// Builds the profile at `profile_path` from the dSYM DWARF file at
+/// `dsym_path`, reusing a valid existing profile.
+#[cfg(feature = "macos")]
+fn create_profile_from_dsym(profile_path: PathBuf, dsym_path: &Path) -> Result<Entry, Error> {
+    if let Some(parent) = profile_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    with_part_file(profile_path, |profile_file| {
+        let dsym_file = File::open(dsym_path)?;
+        isr_dwarf::create_profile_from_dsym(dsym_file, |profile| {
+            Entry::encode(profile_file, profile)
+        })?;
+
+        Ok(())
+    })
+}
+
+/// Reads the `LC_UUID` of the Mach-O file at `path`.
+#[cfg(feature = "macos")]
+fn mach_uuid(path: &Path) -> Result<Option<[u8; 16]>, Error> {
+    use object::Object as _;
+
+    let data = unsafe { Mmap::map(&File::open(path)?)? };
+    Ok(object::File::parse(&*data)?.mach_uuid()?)
+}
+
+/// Formats `uuid` as uppercase hex with dashes, e.g.
+/// `D36225BA-FD41-3361-A406-B77B0E260801`.
+#[cfg(feature = "macos")]
+fn format_uuid(uuid: &[u8; 16]) -> String {
+    let mut output = String::with_capacity(36);
+
+    for (index, byte) in uuid.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            output.push('-');
+        }
+        output.push_str(&format!("{byte:02X}"));
+    }
+
+    output
 }
 
 /// Runs `f` against a sibling `.part` file, then renames it over `dest`.
+///
+/// An existing profile is reused only if it passes archive validation;
+/// otherwise (e.g. written by an older schema) it is deleted and rebuilt.
 #[allow(unused)]
 fn with_part_file<F>(profile_path: PathBuf, f: F) -> Result<Entry, Error>
 where
     F: FnOnce(File) -> Result<(), Error>,
 {
     if profile_path.exists() {
-        tracing::debug!(
-            profile_path = %profile_path.display(),
-            "profile already exists"
-        );
+        let entry = Entry::new(profile_path.clone())?;
+        let validation = entry.profile().map(|_| ());
 
-        return Entry::new(profile_path);
+        match validation {
+            Ok(()) => {
+                tracing::debug!(
+                    profile_path = %profile_path.display(),
+                    "profile already exists"
+                );
+
+                return Ok(entry);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    %err,
+                    profile_path = %profile_path.display(),
+                    "invalid profile, rebuilding"
+                );
+
+                // The mapping must be released before the file can be removed.
+                drop(entry);
+                std::fs::remove_file(&profile_path)?;
+            }
+        }
     }
 
     let tmp = profile_path.with_added_extension("part");
@@ -461,4 +637,41 @@ where
     std::fs::rename(&tmp, &profile_path)?;
 
     Entry::new(profile_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Encodes a profile holding a single `marker` symbol.
+    fn encode_marker(file: File) -> Result<(), Error> {
+        let mut profile = isr_core::schema::Profile::default();
+        profile.symbols.insert(String::from("marker"), 0x1234);
+        Entry::encode(file, &profile)
+    }
+
+    #[test]
+    fn corrupt_profile_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile_path = dir.path().join("profile.isr");
+        std::fs::write(&profile_path, b"not an rkyv archive").unwrap();
+
+        let entry = with_part_file(profile_path.clone(), encode_marker).unwrap();
+        assert_eq!(entry.profile().unwrap().find_symbol("marker"), Some(0x1234));
+        drop(entry);
+
+        // A valid profile is reused without rebuilding.
+        let entry = with_part_file(profile_path, |_file| unreachable!()).unwrap();
+        assert_eq!(entry.profile().unwrap().find_symbol("marker"), Some(0x1234));
+    }
+
+    #[cfg(feature = "macos")]
+    #[test]
+    fn formats_uuid() {
+        let uuid = [
+            0xD3, 0x62, 0x25, 0xBA, 0xFD, 0x41, 0x33, 0x61, 0xA4, 0x06, 0xB7, 0x7B, 0x0E, 0x26,
+            0x08, 0x01,
+        ];
+        assert_eq!(format_uuid(&uuid), "D36225BA-FD41-3361-A406-B77B0E260801");
+    }
 }

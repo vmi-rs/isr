@@ -22,6 +22,7 @@ workspace = true
 
 [dependencies]
 memmap2 = { workspace = true }
+object = { workspace = true, optional = true }
 rkyv = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
@@ -34,13 +35,16 @@ isr-dwarf = { workspace = true, optional = true }
 isr-dl = { workspace = true }
 isr-dl-linux = { workspace = true, optional = true }
 isr-dl-windows = { workspace = true, optional = true }
+isr-dl-macos = { workspace = true, optional = true }
 
 [dev-dependencies]
 # isr = { path = "../..", version = { workspace = true } }
+tempfile = { workspace = true }
 
 [features]
 default = []
 
 linux = ["isr-dl-linux", "isr-dwarf"]
 windows = ["isr-dl-windows", "isr-pdb"]
+macos = ["isr-dl-macos", "isr-dwarf", "object"]
 json = ["serde", "serde_json", "isr-core/serde"]
