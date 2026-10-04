@@ -288,22 +288,20 @@ impl KdkSymbolDownloader {
         Ok(self.manifest.get_or_init(|| manifest))
     }
 
-    /// Returns the cached manifest regardless of its age.
-    fn load_cached_manifest(&self) -> Option<&KdkManifest> {
-        if let Some(manifest) = self.manifest.get() {
-            return Some(manifest);
-        }
-
+    /// Reads the cached manifest regardless of its age.
+    ///
+    /// The manifest is returned as an owned value and never stored in
+    /// `self.manifest`, so a stale copy cannot bypass the freshness check of
+    /// [`Self::fetch_manifest`].
+    fn load_cached_manifest(&self) -> Option<KdkManifest> {
         let json = std::fs::read(self.manifest_path()).ok()?;
-        let manifest = match KdkManifest::from_json(&json) {
-            Ok(manifest) => manifest,
+        match KdkManifest::from_json(&json) {
+            Ok(manifest) => Some(manifest),
             Err(err) => {
                 tracing::debug!(%err, "cached manifest unavailable");
-                return None;
+                None
             }
-        };
-
-        Some(self.manifest.get_or_init(|| manifest))
+        }
     }
 
     /// Downloads `url` to `output` through a `.part` file.
@@ -412,6 +410,12 @@ fn is_fresh(path: &Path, max_age: Duration) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read as _, Write as _},
+        net::TcpListener,
+        thread::JoinHandle,
+    };
+
     use super::*;
 
     const VERSION: &str = "Darwin Kernel Version 27.0.0: Tue Aug 11 21:00:07 PDT 2026; \
@@ -494,5 +498,80 @@ mod tests {
             build_from_bundle_name(Path::new("KDK_27.0.1_26A434.kdk")).as_deref(),
             Some("26A434")
         );
+    }
+
+    /// Returns a manifest listing `VERSION` under `build`.
+    fn manifest_json(build: &str, sha256sum: &str) -> String {
+        format!(
+            r#"[{{"build": "{build}", "version": "27.0.1", "url": "https://example.com/k.dmg",
+                 "sha256sum": "{sha256sum}",
+                 "kernel_versions": {{"kernel.release.vmapple": "{VERSION}"}}}}]"#
+        )
+    }
+
+    /// Creates extracted kernel files for `kernel_name` in `directory`.
+    fn create_kernel_files(directory: &Path, kernel_name: &str) {
+        let dsym = dsym_path(directory, kernel_name);
+        std::fs::create_dir_all(dsym.parent().unwrap()).unwrap();
+        std::fs::write(&dsym, b"dwarf").unwrap();
+        std::fs::write(directory.join(kernel_name), b"kernel").unwrap();
+    }
+
+    /// Serves `body` to a single HTTP request and returns the URL serving it.
+    fn serve_once(body: String) -> (Url, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!(
+            "http://{}/manifest.json",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..count]);
+            }
+
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+
+        (url, handle)
+    }
+
+    #[test]
+    fn stale_manifest_read_by_lookup_is_refreshed_by_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(out.join("_index")).unwrap();
+        std::fs::write(out.join("_index").join("manifest.json"), "[]").unwrap();
+        create_kernel_files(&out.join("26A434"), "kernel.release.vmapple");
+
+        let (manifest_url, server) = serve_once(manifest_json("26A434", ""));
+        let downloader = KdkSymbolDownloader::builder()
+            .client(Client::builder().no_proxy().build().unwrap())
+            .manifest_url(manifest_url)
+            .output_directory(&out)
+            .index_max_age(Duration::ZERO)
+            .build();
+
+        // The stale cached manifest does not list the kernel yet.
+        let version = VERSION.parse::<DarwinVersion>().unwrap();
+        assert!(downloader.lookup(&version).is_none());
+
+        let paths = downloader.download(&version).unwrap();
+        server.join().unwrap();
+        assert_eq!(paths.build, "26A434");
+        assert_eq!(paths.output_directory, out.join("26A434"));
     }
 }
