@@ -24,6 +24,9 @@
 //!   For Linux (currently Ubuntu), automatically downloads and extracts the
 //!   kernel debug symbols and the `System.map` file.
 //!
+//!   For macOS, automatically downloads the Kernel Debug Kit matching an XNU
+//!   kernel version string and extracts the kernel and its dSYM.
+//!
 //! - **Convenient Macros:** Provides [`symbols!`] and [`offsets!`] macros for
 //!   streamlined symbol definition and type-safe access in your code.
 //!
@@ -133,7 +136,7 @@ pub mod dwarf {
     pub use isr_dwarf::*;
 }
 
-#[cfg(any(feature = "dl-linux", feature = "dl-windows"))]
+#[cfg(any(feature = "dl-linux", feature = "dl-windows", feature = "dl-macos"))]
 pub mod download {
     //! Downloaders for various symbol formats.
 
@@ -151,5 +154,12 @@ pub mod download {
         #![doc = include_str!("../docs/isr-dl-windows.md")]
 
         pub use isr_dl_windows::*;
+    }
+
+    #[cfg(feature = "dl-macos")]
+    pub mod macos {
+        #![doc = include_str!("../docs/isr-dl-macos.md")]
+
+        pub use isr_dl_macos::*;
     }
 }

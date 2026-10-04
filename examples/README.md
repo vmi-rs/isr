@@ -27,6 +27,20 @@
   cargo run --example ubuntu --features cache,dwarf,dl-linux
   ```
 
+- **[`macos.rs`]**
+
+  Downloads the macOS Kernel Debug Kit matching an XNU kernel version string
+  via `IsrCache`, extracts the kernel dSYM, then prints symbol addresses and
+  struct offsets resolved from the profile. An optional second argument
+  overrides the cache directory.
+
+  Run it with:
+
+  ```
+  cargo run --example macos --features cache,dwarf,dl-macos -- "<version string>" [<cache_dir>]
+  ```
+
 
 [`windows.rs`]: https://github.com/vmi-rs/isr/blob/master/examples/windows.rs
 [`ubuntu.rs`]: https://github.com/vmi-rs/isr/blob/master/examples/ubuntu.rs
+[`macos.rs`]: https://github.com/vmi-rs/isr/blob/master/examples/macos.rs

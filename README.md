@@ -30,6 +30,9 @@ needing to hardcode offsets or constantly update for new releases.
   For Linux (currently Ubuntu), automatically downloads and extracts the
   kernel debug symbols and the `System.map` file.
 
+  For macOS, automatically downloads the Kernel Debug Kit matching an XNU
+  kernel version string and extracts the kernel and its dSYM.
+
 - **Convenient Macros:** Provides [`symbols!`] and [`offsets!`] macros for
   streamlined symbol definition and type-safe access in your code.
 

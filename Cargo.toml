@@ -104,6 +104,7 @@ isr-pdb = { workspace = true, optional = true }
 isr-dl = { workspace = true, optional = true }
 isr-dl-linux = { workspace = true, optional = true }
 isr-dl-windows = { workspace = true, optional = true }
+isr-dl-macos = { workspace = true, optional = true }
 
 [dev-dependencies]
 indicatif = { workspace = true }
@@ -138,6 +139,12 @@ dl-windows = [
     "isr-cache?/windows"
 ]
 
+dl-macos = [
+    "isr-dl",
+    "isr-dl-macos",
+    "isr-cache?/macos"
+]
+
 [[example]]
 name = "windows"
 path = "examples/windows.rs"
@@ -149,3 +156,9 @@ name = "ubuntu"
 path = "examples/ubuntu.rs"
 doc-scrape-examples = true
 required-features = ["cache", "dwarf", "dl-linux"]
+
+[[example]]
+name = "macos"
+path = "examples/macos.rs"
+doc-scrape-examples = true
+required-features = ["cache", "dwarf", "dl-macos"]
