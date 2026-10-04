@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LTO for cross-unit types, no longer degrade to void.
 - Struct, union, class and enum definitions nested in other types are added
   to the profile, so fields declared through anonymous members resolve.
+- Nested definitions carried only by a declaration or by a duplicate copy of
+  their enclosing type are added. Clang emits C++ nested types lazily, so
+  these copies are common.
 - Pointer and reference sizes default to the unit address size, and
   restrict, atomic, immutable and ptrauth qualifiers and unspecified types
   resolve to their underlying types.

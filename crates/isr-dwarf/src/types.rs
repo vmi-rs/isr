@@ -145,6 +145,10 @@ impl DeclIndex {
     }
 
     /// Indexes a definition and the definitions nested inside it.
+    ///
+    /// Nested definitions are indexed even when `node` is a declaration or a
+    /// duplicate, because compilers emit C++ nested types lazily and only
+    /// some copies of the enclosing type carry them.
     fn add_definition<'data>(
         &mut self,
         unit: UnitRef<'_, Reader<'data>>,
@@ -152,23 +156,29 @@ impl DeclIndex {
     ) -> Result<(), Error> {
         let entry = node.entry();
         let tag = entry.tag();
-        if !is_definition_tag(tag) || entry.declaration()?.unwrap_or(false) {
+        if !is_definition_tag(tag) {
             return Ok(());
         }
 
         let offset = section_offset(unit, entry);
         let name = entry.name(&unit)?;
-        let file = entry.decl_file(&unit)?;
+        let declaration = entry.declaration()?.unwrap_or(false);
+        let anonymous = name.is_none();
+        let file = if declaration {
+            None
+        }
+        else {
+            entry.decl_file(&unit)?
+        };
         let line = entry.decl_line()?;
         let column = entry.decl_column()?;
-        let anonymous = name.is_none();
 
         let mut layout = Vec::new();
         let mut children = node.children();
         while let Some(child) = children.next()? {
             let child_entry = child.entry();
             match child_entry.tag() {
-                gimli::DW_TAG_member | gimli::DW_TAG_enumerator if anonymous => {
+                gimli::DW_TAG_member | gimli::DW_TAG_enumerator if anonymous && !declaration => {
                     let location = match child_entry.data_member_location()? {
                         Some(location) => location,
                         None => child_entry.data_bit_offset()?.unwrap_or(0),
@@ -178,6 +188,10 @@ impl DeclIndex {
                 child_tag if is_definition_tag(child_tag) => self.add_definition(unit, child)?,
                 _ => (),
             }
+        }
+
+        if declaration {
+            return Ok(());
         }
 
         let (file, line) = match (file, line) {
@@ -235,8 +249,12 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
         Ok(())
     }
 
-    /// Adds a definition and the definitions nested inside it, unless it is a
-    /// declaration or a copy of a definition that is already added.
+    /// Adds a definition and the definitions nested inside it.
+    ///
+    /// A declaration or a copy of a definition that is already added is not
+    /// added itself, but the definitions nested inside it still are, because
+    /// compilers emit C++ nested types lazily and only some copies of the
+    /// enclosing type carry them.
     fn add_definition(
         &self,
         profile: &mut Profile,
@@ -244,18 +262,35 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
         node: EntriesTreeNode<'_, '_, Reader<'data>>,
     ) -> Result<(), Error> {
         let entry = node.entry();
-        if !is_definition_tag(entry.tag()) || entry.declaration()?.unwrap_or(false) {
+        if !is_definition_tag(entry.tag()) {
             return Ok(());
         }
 
-        if self.duplicates.contains_key(&section_offset(unit, entry)) {
-            return Ok(());
+        if entry.declaration()?.unwrap_or(false)
+            || self.duplicates.contains_key(&section_offset(unit, entry))
+        {
+            return self.add_nested_definitions(profile, unit, node);
         }
 
         match struct_kind(entry.tag()) {
             Some(kind) => self.add_struct(profile, unit, node, kind),
             None => self.add_enum(profile, unit, node),
         }
+    }
+
+    /// Adds the definitions nested inside `node` without adding `node`.
+    fn add_nested_definitions(
+        &self,
+        profile: &mut Profile,
+        unit: UnitRef<'u, Reader<'data>>,
+        node: EntriesTreeNode<'_, '_, Reader<'data>>,
+    ) -> Result<(), Error> {
+        let mut children = node.children();
+        while let Some(child) = children.next()? {
+            self.add_definition(profile, unit, child)?;
+        }
+
+        Ok(())
     }
 
     /// Returns the profile name of a type definition.
