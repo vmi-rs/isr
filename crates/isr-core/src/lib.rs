@@ -5,9 +5,9 @@ pub mod visit;
 
 use crate::schema::{
     ANONYMOUS_FIELD_PREFIX, ArchivedArchitecture, ArchivedArray, ArchivedBase, ArchivedBitfield,
-    ArchivedEnum, ArchivedEnumRef, ArchivedField, ArchivedPointer, ArchivedProfile,
-    ArchivedSegment, ArchivedStruct, ArchivedStructKind, ArchivedStructRef, ArchivedType,
-    ArchivedVariant,
+    ArchivedEnum, ArchivedEnumRef, ArchivedField, ArchivedFunction, ArchivedParameter,
+    ArchivedPointer, ArchivedProfile, ArchivedSegment, ArchivedStruct, ArchivedStructKind,
+    ArchivedStructRef, ArchivedType, ArchivedVariant,
 };
 
 /// A typed view over an archived profile.
@@ -81,6 +81,14 @@ impl<'a> Profile<'a> {
         Architecture::from_archived(&self.inner.architecture)
     }
 
+    /// Returns the format version the profile was generated with.
+    ///
+    /// Profiles of a version other than [`schema::FORMAT_VERSION`] may lack
+    /// data, such as function prototypes, and should be regenerated.
+    pub fn version(&self) -> u32 {
+        self.inner.version.into()
+    }
+
     /// Returns the enums.
     pub fn enums(&self) -> impl ExactSizeIterator<Item = Enum<'a>> {
         self.inner.enums.iter().map(|(name, inner)| Enum {
@@ -111,6 +119,14 @@ impl<'a> Profile<'a> {
             .segments
             .iter()
             .map(|(name, inner)| Segment::from_archived(name.as_ref(), inner))
+    }
+
+    /// Returns the function prototypes.
+    pub fn functions(&self) -> impl ExactSizeIterator<Item = Function<'a>> {
+        self.inner.functions.iter().map(|(name, inner)| Function {
+            name: name.as_ref(),
+            inner,
+        })
     }
 
     /// Returns the size of a given type in bytes.
@@ -165,6 +181,17 @@ impl<'a> Profile<'a> {
             .structs
             .get_key_value(type_name)
             .map(|(name, inner)| Struct {
+                name: name.as_ref(),
+                inner,
+            })
+    }
+
+    /// Finds a function prototype by symbol name.
+    pub fn find_function(&self, function_name: &str) -> Option<Function<'a>> {
+        self.inner
+            .functions
+            .get_key_value(function_name)
+            .map(|(name, inner)| Function {
                 name: name.as_ref(),
                 inner,
             })
@@ -459,6 +486,59 @@ impl<'a> Field<'a> {
     }
 }
 
+/// A function prototype.
+#[derive(Debug, Clone, Copy)]
+pub struct Function<'a> {
+    name: &'a str,
+    inner: &'a ArchivedFunction,
+}
+
+impl<'a> Function<'a> {
+    /// Returns the symbol name of the function.
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
+
+    /// Returns the return type, [`Base::Void`] for functions without a
+    /// result.
+    pub fn return_type(&self) -> Type<'a> {
+        Type::from_archived(&self.inner.return_type)
+    }
+
+    /// Returns the parameters in declaration order.
+    pub fn parameters(&self) -> impl ExactSizeIterator<Item = Parameter<'a>> + use<'a> {
+        self.inner
+            .parameters
+            .iter()
+            .map(|inner| Parameter { inner })
+    }
+
+    /// Returns `true` if the function takes a variable number of arguments
+    /// after its parameters.
+    pub fn is_variadic(&self) -> bool {
+        self.inner.variadic
+    }
+}
+
+/// A function parameter.
+#[derive(Debug, Clone, Copy)]
+pub struct Parameter<'a> {
+    inner: &'a ArchivedParameter,
+}
+
+impl<'a> Parameter<'a> {
+    /// Returns the name of the parameter, `None` if the debug information
+    /// does not record one.
+    pub fn name(&self) -> Option<&'a str> {
+        self.inner.name.as_ref().map(|name| name.as_str())
+    }
+
+    /// Returns the type of the parameter.
+    pub fn ty(&self) -> Type<'a> {
+        Type::from_archived(&self.inner.ty)
+    }
+}
+
 /// Type.
 #[derive(Debug, Clone, Copy)]
 pub enum Type<'a> {
@@ -669,7 +749,7 @@ mod tests {
     use indexmap::IndexMap;
     use rkyv::util::AlignedVec;
 
-    use super::Profile;
+    use super::{Base, Profile, Type};
     use crate::schema::{self, ArchivedProfile};
 
     /// Serializes a profile with the given segments into an rkyv buffer.
@@ -856,5 +936,54 @@ mod tests {
 
         let cycle = profile.find_struct("cycle").unwrap();
         assert!(cycle.find_field(&profile, "missing").is_none());
+    }
+
+    #[test]
+    fn find_function_returns_prototype() {
+        let mut profile = schema::Profile::default();
+        profile.functions.insert(
+            String::from("printf"),
+            schema::Function {
+                return_type: schema::Type::Base(schema::Base::I32),
+                parameters: vec![schema::Parameter {
+                    name: Some(String::from("format")),
+                    ty: schema::Type::Pointer(schema::Pointer {
+                        subtype: Box::new(schema::Type::Base(schema::Base::Char8)),
+                        size: 8,
+                    }),
+                }],
+                variadic: true,
+            },
+        );
+        profile.functions.insert(
+            String::from("abort"),
+            schema::Function {
+                return_type: schema::Type::Base(schema::Base::Void),
+                parameters: vec![schema::Parameter {
+                    name: None,
+                    ty: schema::Type::Base(schema::Base::U32),
+                }],
+                variadic: false,
+            },
+        );
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&profile).expect("serialize profile");
+        let profile = view(&bytes);
+
+        assert_eq!(profile.version(), schema::FORMAT_VERSION);
+        assert_eq!(profile.functions().len(), 2);
+        assert!(profile.find_function("missing").is_none());
+
+        let printf = profile.find_function("printf").unwrap();
+        assert_eq!(printf.name(), "printf");
+        assert!(printf.is_variadic());
+        assert!(matches!(printf.return_type(), Type::Base(Base::I32)));
+        let parameters = printf.parameters().collect::<Vec<_>>();
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name(), Some("format"));
+        assert!(matches!(parameters[0].ty(), Type::Pointer(pointer) if pointer.size() == 8));
+
+        let abort = profile.find_function("abort").unwrap();
+        assert!(!abort.is_variadic());
+        assert_eq!(abort.parameters().next().unwrap().name(), None);
     }
 }

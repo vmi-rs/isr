@@ -223,10 +223,9 @@ fn build_ntkrnlmp_subset() -> OwnedProfile {
 
     OwnedProfile {
         architecture: Architecture::Amd64,
-        enums: IndexMap::new(),
         structs,
         symbols,
-        segments: IndexMap::new(),
+        ..Default::default()
     }
 }
 

@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returning it.
 - DWARF profiles take their architecture from the object file instead of
   always reporting `Amd64`.
+- **Breaking:** `schema::Profile` has the new fields `version` and
+  `functions`, and its `Default` sets `version` to the new
+  `schema::FORMAT_VERSION`. Struct literals must initialize them, and
+  archived profiles from earlier versions no longer validate.
 - **Breaking:** DWARF profiles name an anonymous struct, union, class or
   enum after the file or namespace scope typedef declaring it, as in
   `typedef struct { ... } mach_msg_header_t`, instead of `__unnamed_<offset>`,
@@ -62,9 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `isr_dwarf::units::DwarfUnits`, which keeps only unit headers and parses
   units on demand, `units::Reference`, `symbols::MachOSymbols` and
   `segments::MachOSegments`.
+- Function prototypes: `schema::Function` and `schema::Parameter`, the
+  `Function` and `Parameter` views, `Profile::functions` and
+  `Profile::find_function`.
 - `Struct::find_field`, which looks into C11 anonymous struct and union
   members and returns offsets relative to the outer struct,
   `Field::is_anonymous` and `schema::ANONYMOUS_FIELD_PREFIX`.
+- `Profile::version`.
 
 ### Removed
 
