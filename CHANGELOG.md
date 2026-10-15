@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returning it.
 - DWARF profiles take their architecture from the object file instead of
   always reporting `Amd64`.
+- **Breaking:** DWARF profiles name an anonymous struct, union, class or
+  enum after the file or namespace scope typedef declaring it, as in
+  `typedef struct { ... } mach_msg_header_t`, instead of `__unnamed_<offset>`,
+  and every reference to it uses that name. Copies of the same layout
+  declared in different files, such as a header and its installed copy, are
+  merged. A typedef name used by a named type of the same kind, or given to
+  anonymous types of different layouts, keeps the `__unnamed_*` names.
 
 ### Added
 

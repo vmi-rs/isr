@@ -1,11 +1,11 @@
 //! DWARF type extraction.
 
-use std::collections::{HashMap, hash_map};
+use std::collections::{HashMap, HashSet, hash_map};
 
 use gimli::{
     AttributeValue, DebuggingInformationEntry, DwTag, EntriesTreeNode, Error, UnitOffset, UnitRef,
 };
-use indexmap::{IndexMap, map::Entry};
+use indexmap::{IndexMap, IndexSet, map::Entry};
 use isr_core::schema::{
     ANONYMOUS_FIELD_PREFIX, Array, Base, Bitfield, Enum, EnumRef, Field, Pointer, Profile, Struct,
     StructKind, StructRef, Type, Variant,
@@ -34,6 +34,13 @@ pub trait DwarfTypes<'data> {
     /// In C++ units, types declared inside a class or namespace are named
     /// with their qualified scope, for example `Outer::Nested`. Types of
     /// other units keep their unqualified name.
+    ///
+    /// An anonymous definition named by a file or namespace scope typedef,
+    /// as in `typedef struct { ... } name_t`, is added under the typedef
+    /// name, which every reference to it uses as well. It keeps an
+    /// `__unnamed_<offset>` name if a named definition of the same kind uses
+    /// the typedef name or the name is given to anonymous definitions of
+    /// different layouts.
     fn add_types(&mut self, units: &DwarfUnits<'data>) -> Result<(), Error>;
 }
 
@@ -46,10 +53,12 @@ impl<'data> DwarfTypes<'data> for Profile {
             index.add_unit(units.unit_ref(&unit))?;
         }
 
+        let typedef_names = index.typedef_names();
         let collector = TypeCollector {
             units,
             duplicates: index.duplicates,
             qualified_names: index.qualified_names,
+            typedef_names,
         };
 
         for unit_index in 0..units.len() {
@@ -185,7 +194,8 @@ struct DeclKey {
     layout: Vec<(Option<String>, u64)>,
 }
 
-/// First pass over all units that finds duplicate copies of definitions.
+/// First pass over all units that finds duplicate copies of definitions and
+/// the typedefs that name anonymous definitions.
 #[derive(Default)]
 struct DeclIndex {
     /// Section offset of the first copy of each definition.
@@ -200,6 +210,29 @@ struct DeclIndex {
     /// Covers declarations as well as definitions, so references to either
     /// resolve to the same name.
     qualified_names: HashMap<usize, String>,
+
+    /// Tags of the first copies of anonymous definitions, indexed by section
+    /// offset.
+    anonymous: HashMap<usize, DwTag>,
+
+    /// Profile names of named struct, union and class definitions.
+    struct_names: HashSet<String>,
+
+    /// Profile names of named enum definitions.
+    enum_names: HashSet<String>,
+
+    /// Section offset of the named type and qualified name of each typedef
+    /// of the unit being indexed.
+    unit_typedefs: Vec<(usize, String)>,
+
+    /// Typedefs naming a type in a unit that is not indexed yet, as section
+    /// offset of the type and qualified typedef name.
+    forward_typedefs: Vec<(usize, String)>,
+
+    /// Distinct pairs of the section offset of the first copy of an
+    /// anonymous definition and the qualified name of a typedef naming it,
+    /// in declaration order.
+    typedefs: IndexSet<(usize, String)>,
 }
 
 impl DeclIndex {
@@ -209,11 +242,25 @@ impl DeclIndex {
         let mut tree = unit.entries_tree(None)?;
         let root = tree.root()?;
         let cplusplus = is_cplusplus(root.entry());
-        self.add_scope(unit, root, "", cplusplus)
+        self.add_scope(unit, root, "", cplusplus)?;
+
+        // Every definition of this and the earlier units is indexed now.
+        let unit_end = unit.header.offset().0 + unit.header.length_including_self();
+        let typedefs = std::mem::take(&mut self.unit_typedefs);
+        for (target, name) in typedefs {
+            if target >= unit_end {
+                self.forward_typedefs.push((target, name));
+            }
+            else {
+                self.add_typedef_target(target, name);
+            }
+        }
+
+        Ok(())
     }
 
-    /// Indexes the definitions declared directly in the unit or namespace
-    /// `node`, whose qualified name is `scope`.
+    /// Indexes the definitions and typedefs declared directly in the unit or
+    /// namespace `node`, whose qualified name is `scope`.
     fn add_scope<'data>(
         &mut self,
         unit: UnitRef<'_, Reader<'data>>,
@@ -226,6 +273,9 @@ impl DeclIndex {
             let tag = child.entry().tag();
             if is_definition_tag(tag) {
                 self.add_definition(unit, child, scope, cplusplus)?;
+            }
+            else if tag == gimli::DW_TAG_typedef {
+                self.add_typedef(unit, child.entry(), scope)?;
             }
             else if tag == gimli::DW_TAG_namespace && cplusplus {
                 let name = namespace_name(unit, child.entry())?;
@@ -300,10 +350,32 @@ impl DeclIndex {
             return Ok(());
         }
 
+        if let Some(name) = &name {
+            let names = match tag {
+                gimli::DW_TAG_enumeration_type => &mut self.enum_names,
+                _ => &mut self.struct_names,
+            };
+
+            let profile_name = if cplusplus {
+                qualify(scope, name)
+            }
+            else {
+                name.clone()
+            };
+
+            if !names.contains(&profile_name) {
+                names.insert(profile_name);
+            }
+        }
+
         let (file, line) = match (file, line) {
             (Some(file), Some(line)) => (file, line),
             _ => {
                 tracing::trace!(?name, offset, "missing declaration information");
+                if anonymous {
+                    self.anonymous.insert(offset, tag);
+                }
+
                 return Ok(());
             }
         };
@@ -321,6 +393,9 @@ impl DeclIndex {
         match self.first.entry(key) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(offset);
+                if anonymous {
+                    self.anonymous.insert(offset, tag);
+                }
             }
             hash_map::Entry::Occupied(entry) => {
                 self.duplicates.insert(offset, *entry.get());
@@ -328,6 +403,143 @@ impl DeclIndex {
         }
 
         Ok(())
+    }
+
+    /// Queues a typedef declared in `scope` for naming the type it refers
+    /// to, once the unit is indexed.
+    fn add_typedef<'data>(
+        &mut self,
+        unit: UnitRef<'_, Reader<'data>>,
+        entry: &DebuggingInformationEntry<Reader<'data>>,
+        scope: &str,
+    ) -> Result<(), Error> {
+        let name = match entry.name(&unit)? {
+            Some(name) => name,
+            None => return Ok(()),
+        };
+
+        let target = match entry.attr_value(gimli::DW_AT_type) {
+            Some(AttributeValue::UnitRef(offset)) => offset.to_unit_section_offset(&unit).0,
+            Some(AttributeValue::DebugInfoRef(offset)) => offset.0,
+            _ => return Ok(()),
+        };
+
+        self.unit_typedefs.push((target, qualify(scope, &name)));
+        Ok(())
+    }
+
+    /// Records the typedef `name` of the type at section offset `target` if
+    /// that type is an anonymous definition.
+    ///
+    /// `target` must belong to an indexed unit.
+    fn add_typedef_target(&mut self, target: usize, name: String) {
+        let canonical = match self.duplicates.get(&target) {
+            Some(&canonical) => canonical,
+            None => target,
+        };
+
+        if self.anonymous.contains_key(&canonical) {
+            self.typedefs.insert((canonical, name));
+        }
+    }
+
+    /// Returns the typedef names of anonymous definitions, indexed by the
+    /// section offset of the copy added to the profile.
+    ///
+    /// C code commonly declares a type as `typedef struct { ... } name_t`,
+    /// whose definition has no name of its own. Such a definition takes the
+    /// name of the typedef, unless
+    ///
+    /// - a named definition of the same kind already uses the name,
+    /// - the typedef name is given to anonymous definitions of different
+    ///   layouts, for example in different configurations of a header.
+    ///
+    /// In both cases the definitions keep their `__unnamed_*` names. Copies
+    /// of the same layout that are declared in different files, such as a
+    /// header and its installed copy, are merged into one definition. A
+    /// definition named by several typedefs takes the first name.
+    fn typedef_names(&mut self) -> HashMap<usize, String> {
+        let forward_typedefs = std::mem::take(&mut self.forward_typedefs);
+        for (target, name) in forward_typedefs {
+            self.add_typedef_target(target, name);
+        }
+
+        // First copies of the anonymous definitions each typedef name names,
+        // indexed by whether they are enums, because enums and structs are
+        // kept in different maps of the profile.
+        let mut candidates = IndexMap::<(bool, String), Vec<usize>>::new();
+        for (offset, name) in std::mem::take(&mut self.typedefs) {
+            let is_enum = self.anonymous[&offset] == gimli::DW_TAG_enumeration_type;
+            candidates.entry((is_enum, name)).or_default().push(offset);
+        }
+
+        let ambiguous = candidates
+            .values()
+            .filter(|offsets| offsets.len() > 1)
+            .flatten()
+            .copied()
+            .collect::<HashSet<_>>();
+        let keys = self
+            .first
+            .iter()
+            .filter(|(_, offset)| ambiguous.contains(offset))
+            .map(|(key, &offset)| (offset, key))
+            .collect::<HashMap<_, _>>();
+
+        let mut names = HashMap::new();
+        let mut merged = HashMap::new();
+        for ((is_enum, name), offsets) in candidates {
+            let named = if is_enum {
+                &self.enum_names
+            }
+            else {
+                &self.struct_names
+            };
+
+            if named.contains(&name) {
+                tracing::warn!(%name, "typedef name of an anonymous type is used by a named type");
+                continue;
+            }
+
+            let canonical = offsets[0];
+            let same_layout =
+                offsets[1..]
+                    .iter()
+                    .all(|offset| match (keys.get(&canonical), keys.get(offset)) {
+                        (Some(first), Some(other)) => {
+                            first.tag == other.tag && first.layout == other.layout
+                        }
+                        _ => false,
+                    });
+
+            if !same_layout {
+                tracing::warn!(
+                    %name,
+                    copies = offsets.len(),
+                    "typedef name is given to different anonymous types"
+                );
+                continue;
+            }
+
+            if names.contains_key(&canonical) {
+                continue;
+            }
+
+            for &offset in &offsets[1..] {
+                merged.insert(offset, canonical);
+            }
+
+            names.insert(canonical, name);
+        }
+
+        for canonical in self.duplicates.values_mut() {
+            if let Some(&merged_canonical) = merged.get(canonical) {
+                *canonical = merged_canonical;
+            }
+        }
+        self.duplicates.extend(merged);
+
+        names
     }
 }
 
@@ -343,6 +555,10 @@ struct TypeCollector<'u, 'data> {
     /// Qualified names of C++ types declared inside a class or namespace,
     /// keyed by section offset.
     qualified_names: HashMap<usize, String>,
+
+    /// Typedef names of anonymous definitions, indexed by the section offset
+    /// of the copy added to the profile.
+    typedef_names: HashMap<usize, String>,
 }
 
 impl<'u, 'data> TypeCollector<'u, 'data> {
@@ -426,8 +642,9 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     /// Returns the profile name of a type definition or declaration.
     ///
     /// C++ types declared inside a class or namespace are named with their
-    /// qualified scope. Anonymous types are named after the section offset
-    /// of the copy added to the profile.
+    /// qualified scope. Anonymous types take the name of the typedef naming
+    /// them, see [`DeclIndex::typedef_names`], or are named after the
+    /// section offset of the copy added to the profile.
     fn type_name(
         &self,
         unit: UnitRef<'_, Reader<'data>>,
@@ -446,7 +663,10 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
                     None => offset,
                 };
 
-                Ok(format!("__unnamed_{offset:x}"))
+                match self.typedef_names.get(&offset) {
+                    Some(name) => Ok(name.clone()),
+                    None => Ok(format!("__unnamed_{offset:x}")),
+                }
             }
         }
     }
