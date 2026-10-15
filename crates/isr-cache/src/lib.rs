@@ -123,8 +123,21 @@ impl Entry {
     }
 
     /// Decodes the profile from the entry.
+    ///
+    /// Fails with [`Error::ProfileVersion`] if the profile was generated with
+    /// a format version other than [`isr_core::schema::FORMAT_VERSION`].
     pub fn profile(&self) -> Result<Profile<'_>, Error> {
-        let archived = rkyv::access::<_, rkyv::rancor::Error>(&self.data)?;
+        let archived =
+            rkyv::access::<isr_core::schema::ArchivedProfile, rkyv::rancor::Error>(&self.data)?;
+
+        let found = archived.version.to_native();
+        if found != isr_core::schema::FORMAT_VERSION {
+            return Err(Error::ProfileVersion {
+                found,
+                expected: isr_core::schema::FORMAT_VERSION,
+            });
+        }
+
         Ok(Profile::from_archived(archived))
     }
 
@@ -598,9 +611,11 @@ fn format_uuid(uuid: &[u8; 16]) -> String {
 
 /// Runs `f` against a sibling `.part` file, then renames it over `dest`.
 ///
-/// An existing profile is reused only if it passes archive validation. A
-/// profile that fails validation, for example one written by an older
-/// schema, is deleted and rebuilt.
+/// An existing profile is reused only if it passes archive validation and
+/// carries the current [`isr_core::schema::FORMAT_VERSION`]. Any other
+/// profile, for example one written by an older schema or by an older
+/// generator that lacks data such as function prototypes, is deleted and
+/// rebuilt.
 #[allow(unused)]
 fn with_part_file<F>(profile_path: PathBuf, f: F) -> Result<Entry, Error>
 where
@@ -665,6 +680,31 @@ mod tests {
         // A valid profile is reused without rebuilding.
         let entry = with_part_file(profile_path, |_file| unreachable!()).unwrap();
         assert_eq!(entry.profile().unwrap().find_symbol("marker"), Some(0x1234));
+    }
+
+    #[test]
+    fn stale_profile_version_is_rebuilt() {
+        let dir = tempfile::tempdir().unwrap();
+        let profile_path = dir.path().join("profile.isr");
+
+        let stale = isr_core::schema::Profile {
+            version: isr_core::schema::FORMAT_VERSION - 1,
+            ..Default::default()
+        };
+        Entry::encode(File::create(&profile_path).unwrap(), &stale).unwrap();
+
+        let entry = Entry::new(profile_path.clone()).unwrap();
+        assert!(matches!(
+            entry.profile(),
+            Err(Error::ProfileVersion { found, expected })
+                if found + 1 == expected && expected == isr_core::schema::FORMAT_VERSION
+        ));
+        drop(entry);
+
+        let entry = with_part_file(profile_path, encode_marker).unwrap();
+        let profile = entry.profile().unwrap();
+        assert_eq!(profile.version(), isr_core::schema::FORMAT_VERSION);
+        assert_eq!(profile.find_symbol("marker"), Some(0x1234));
     }
 
     #[cfg(feature = "macos")]

@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared in different files, such as a header and its installed copy, are
   merged. A typedef name used by a named type of the same kind, or given to
   anonymous types of different layouts, keeps the `__unnamed_*` names.
+- `IsrCache` rebuilds a cached profile of another format version, and
+  `Entry::profile` rejects it with the new `Error::ProfileVersion`.
 
 ### Added
 

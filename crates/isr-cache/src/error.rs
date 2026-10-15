@@ -10,6 +10,16 @@ pub enum Error {
     #[error(transparent)]
     Serialization(#[from] rkyv::rancor::Error),
 
+    /// The profile was generated with a different profile format version.
+    #[error("profile format version {found} does not match {expected}")]
+    ProfileVersion {
+        /// Format version recorded in the profile.
+        found: u32,
+
+        /// Format version of this crate, [`isr_core::schema::FORMAT_VERSION`].
+        expected: u32,
+    },
+
     /// An error occurred while serializing or deserializing JSON.
     #[cfg(feature = "json")]
     #[error(transparent)]
