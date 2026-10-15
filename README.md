@@ -15,7 +15,9 @@ needing to hardcode offsets or constantly update for new releases.
 ## Features
 
 - **Unified Representation:** Abstracts away the underlying symbol format
-  (PDB, DWARF) into a common, easy-to-use structure.
+  (PDB, DWARF) into a common, easy-to-use structure. A profile holds the
+  target architecture, struct, union, class and enum layouts, symbol
+  addresses, image segments (Mach-O) and function prototypes (DWARF).
 
 - **Version Agnostic:** Enables writing code that works seamlessly across
   different OS versions, avoiding the need for version-specific logic.
