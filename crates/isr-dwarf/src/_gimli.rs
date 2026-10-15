@@ -34,6 +34,10 @@ pub type Reader<'data> = RelocateReader<EndianSlice<'data, RunTimeEndian>, &'dat
 
 pub trait DebuggingInformationEntryExt<'data> {
     fn name(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
+    /// Returns the linkage (mangled) name of a subprogram or variable.
+    fn linkage_name(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
+    /// Returns `true` if the entity is visible outside its unit.
+    fn external(&self) -> bool;
     fn decl_file(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error>;
     fn decl_file_index(&self) -> Result<Option<u64>, Error>;
     fn decl_line(&self) -> Result<Option<u64>, Error>;
@@ -54,6 +58,25 @@ impl<'data> DebuggingInformationEntryExt<'data> for DebuggingInformationEntry<Re
             Some(name) => Ok(Some(unit.attr_string(name)?.to_string_lossy()?.to_string())),
             None => Ok(None),
         }
+    }
+
+    fn linkage_name(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error> {
+        let value = self
+            .attr(gimli::DW_AT_linkage_name)
+            .or_else(|| self.attr(gimli::DW_AT_MIPS_linkage_name))
+            .map(Attribute::value);
+
+        match value {
+            Some(name) => Ok(Some(unit.attr_string(name)?.to_string_lossy()?.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    fn external(&self) -> bool {
+        matches!(
+            self.attr_value(gimli::DW_AT_external),
+            Some(AttributeValue::Flag(true))
+        )
     }
 
     fn decl_file(&self, unit: &UnitRef<Reader<'data>>) -> Result<Option<String>, Error> {

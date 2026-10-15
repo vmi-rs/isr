@@ -1,6 +1,9 @@
 //! DWARF type extraction.
 
-use std::collections::{HashMap, HashSet, hash_map};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet, hash_map},
+};
 
 use gimli::{
     AttributeValue, DebuggingInformationEntry, DwTag, EntriesTreeNode, Error, UnitOffset, UnitRef,
@@ -23,9 +26,11 @@ const DW_TAG_LLVM_PTRAUTH_TYPE: DwTag = DwTag(0x4300);
 /// types by `btf_decl_tag`.
 const DW_TAG_LLVM_ANNOTATION: DwTag = DwTag(0x6000);
 
-/// Populates a [`Profile`] with types extracted from DWARF units.
+/// Populates a [`Profile`] with types and function prototypes extracted from
+/// DWARF units.
 pub trait DwarfTypes<'data> {
-    /// Adds every enum, struct, union and class definition found in `units`.
+    /// Adds every enum, struct, union and class definition and every
+    /// external function prototype found in `units`.
     ///
     /// Definitions nested inside other structs, unions and classes are added
     /// as well. Copies of the same definition emitted into several units are
@@ -41,6 +46,12 @@ pub trait DwarfTypes<'data> {
     /// `__unnamed_<offset>` name if a named definition of the same kind uses
     /// the typedef name or the name is given to anonymous definitions of
     /// different layouts.
+    ///
+    /// Function prototypes come from subprograms in unit or namespace scope
+    /// that are visible outside their unit (`DW_AT_external`), indexed by
+    /// their linkage name if they have one and by their name otherwise.
+    /// Definitions are preferred over declarations, and among those the
+    /// copy with the most parameters is kept.
     fn add_types(&mut self, units: &DwarfUnits<'data>) -> Result<(), Error>;
 }
 
@@ -59,6 +70,7 @@ impl<'data> DwarfTypes<'data> for Profile {
             duplicates: index.duplicates,
             qualified_names: index.qualified_names,
             typedef_names,
+            defined_functions: RefCell::default(),
         };
 
         for unit_index in 0..units.len() {
@@ -543,10 +555,11 @@ impl DeclIndex {
     }
 }
 
-/// Second pass over all units that converts definitions into profile types.
-struct TypeCollector<'u, 'data> {
+/// Second pass over all units that converts definitions into profile types
+/// and subprograms into function prototypes.
+pub(crate) struct TypeCollector<'u, 'data> {
     /// Units resolving cross-unit type references.
-    units: &'u DwarfUnits<'data>,
+    pub(crate) units: &'u DwarfUnits<'data>,
 
     /// Section offsets of skipped copies, mapped to the offset of the copy
     /// added to the profile.
@@ -559,6 +572,10 @@ struct TypeCollector<'u, 'data> {
     /// Typedef names of anonymous definitions, indexed by the section offset
     /// of the copy added to the profile.
     typedef_names: HashMap<usize, String>,
+
+    /// Names of the functions whose prototype in the profile comes from a
+    /// definition rather than a declaration.
+    pub(crate) defined_functions: RefCell<HashSet<String>>,
 }
 
 impl<'u, 'data> TypeCollector<'u, 'data> {
@@ -574,8 +591,8 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
         self.add_scope(profile, unit, root, cplusplus)
     }
 
-    /// Adds the definitions declared directly in the unit or namespace
-    /// `node`.
+    /// Adds the definitions and function prototypes declared directly in
+    /// the unit or namespace `node`.
     fn add_scope(
         &self,
         profile: &mut Profile,
@@ -588,6 +605,9 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
             let tag = child.entry().tag();
             if is_definition_tag(tag) {
                 self.add_definition(profile, unit, child)?;
+            }
+            else if tag == gimli::DW_TAG_subprogram {
+                self.add_function(profile, unit, child)?;
             }
             else if tag == gimli::DW_TAG_namespace && cplusplus {
                 self.add_scope(profile, unit, child, cplusplus)?;
@@ -855,7 +875,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
     /// Returns the type referenced by the `DW_AT_type` attribute of `entry`.
     ///
     /// A missing attribute denotes `void`.
-    fn attr_type(
+    pub(crate) fn attr_type(
         &self,
         unit: UnitRef<'_, Reader<'data>>,
         entry: &DebuggingInformationEntry<Reader<'data>>,

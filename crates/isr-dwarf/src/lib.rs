@@ -2,6 +2,7 @@
 
 mod _gimli;
 mod error;
+mod functions;
 mod profile;
 pub mod segments;
 pub mod symbols;

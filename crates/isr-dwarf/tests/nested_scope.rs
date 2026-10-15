@@ -119,3 +119,20 @@ fn c_nested_types_keep_file_scope_names() {
         assert!(!profile.structs.contains_key("COuter::CInner"));
     });
 }
+
+#[test]
+fn method_definitions_are_indexed_by_linkage_name() {
+    with_nested_scope_profile(|profile| {
+        let mut names = profile.functions.keys().collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["_ZN4LazyD0Ev", "_ZN4LazyD2Ev"]);
+
+        // The definitions take their visibility from the declaration in
+        // `Lazy` and carry the `this` parameter themselves.
+        let destructor = &profile.functions["_ZN4LazyD2Ev"];
+        assert!(matches!(destructor.return_type, Type::Base(Base::Void)));
+        assert_eq!(destructor.parameters.len(), 1);
+        assert_eq!(destructor.parameters[0].name.as_deref(), Some("this"));
+        assert_eq!(struct_name(&destructor.parameters[0].ty), "Lazy");
+    });
+}

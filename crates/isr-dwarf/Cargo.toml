@@ -29,3 +29,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 isr-core = { workspace = true }
+
+[dev-dependencies]
+rkyv = { workspace = true }

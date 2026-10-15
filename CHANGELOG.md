@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Function prototypes: `schema::Function` and `schema::Parameter`, the
   `Function` and `Parameter` views, `Profile::functions` and
   `Profile::find_function`.
+- DWARF profiles collect the prototypes of the external subprograms of
+  unit and namespace scope, indexed by linkage name or name, preferring
+  definitions and following `DW_AT_specification`.
 - `Struct::find_field`, which looks into C11 anonymous struct and union
   members and returns offsets relative to the outer struct,
   `Field::is_anonymous` and `schema::ANONYMOUS_FIELD_PREFIX`.
