@@ -7,8 +7,8 @@ use gimli::{
 };
 use indexmap::{IndexMap, map::Entry};
 use isr_core::schema::{
-    Array, Base, Bitfield, Enum, EnumRef, Field, Pointer, Profile, Struct, StructKind, StructRef,
-    Type, Variant,
+    ANONYMOUS_FIELD_PREFIX, Array, Base, Bitfield, Enum, EnumRef, Field, Pointer, Profile, Struct,
+    StructKind, StructRef, Type, Variant,
 };
 
 use super::{
@@ -605,7 +605,7 @@ impl<'u, 'data> TypeCollector<'u, 'data> {
 
         let name = match entry.name(&unit)? {
             Some(name) => name,
-            None => format!("__unnamed_field_{:x}", udt.fields.len()),
+            None => format!("{ANONYMOUS_FIELD_PREFIX}{:x}", udt.fields.len()),
         };
         tracing::Span::current().record("name", &name);
 

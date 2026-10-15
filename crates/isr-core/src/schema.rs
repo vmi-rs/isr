@@ -31,6 +31,13 @@ pub struct Profile {
     pub segments: IndexMap<String, Segment>,
 }
 
+/// Name prefix of struct and union members without a name.
+///
+/// Profile generators name an anonymous member, such as a C11 anonymous
+/// union inside a struct, with this prefix followed by a number that keeps
+/// the names of several anonymous members of one struct apart.
+pub const ANONYMOUS_FIELD_PREFIX: &str = "__unnamed_field_";
+
 /// Image segment.
 #[derive(Debug, Archive, Serialize, Deserialize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

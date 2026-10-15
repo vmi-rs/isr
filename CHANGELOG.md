@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `isr_dwarf::units::DwarfUnits`, which keeps only unit headers and parses
   units on demand, `units::Reference`, `symbols::MachOSymbols` and
   `segments::MachOSegments`.
+- `Struct::find_field`, which looks into C11 anonymous struct and union
+  members and returns offsets relative to the outer struct,
+  `Field::is_anonymous` and `schema::ANONYMOUS_FIELD_PREFIX`.
 
 ### Removed
 

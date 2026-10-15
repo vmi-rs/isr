@@ -4,9 +4,10 @@ pub mod schema;
 pub mod visit;
 
 use crate::schema::{
-    ArchivedArchitecture, ArchivedArray, ArchivedBase, ArchivedBitfield, ArchivedEnum,
-    ArchivedEnumRef, ArchivedField, ArchivedPointer, ArchivedProfile, ArchivedSegment,
-    ArchivedStruct, ArchivedStructKind, ArchivedStructRef, ArchivedType, ArchivedVariant,
+    ANONYMOUS_FIELD_PREFIX, ArchivedArchitecture, ArchivedArray, ArchivedBase, ArchivedBitfield,
+    ArchivedEnum, ArchivedEnumRef, ArchivedField, ArchivedPointer, ArchivedProfile,
+    ArchivedSegment, ArchivedStruct, ArchivedStructKind, ArchivedStructRef, ArchivedType,
+    ArchivedVariant,
 };
 
 /// A typed view over an archived profile.
@@ -308,6 +309,9 @@ impl<'a> Struct<'a> {
     }
 
     /// Finds a field by name.
+    ///
+    /// Only fields declared directly in the struct are found. Use
+    /// [`Self::find_field`] to look into anonymous members.
     pub fn field(&self, name: &str) -> Option<Field<'a>> {
         self.inner
             .fields
@@ -315,7 +319,67 @@ impl<'a> Struct<'a> {
             .map(|(name, field)| Field {
                 name: name.as_ref(),
                 inner: field,
+                base: 0,
             })
+    }
+
+    /// Finds a field by name, looking into anonymous members.
+    ///
+    /// C11 and C++ allow struct and union members without a name, whose
+    /// own members are accessed as if they were members of the enclosing
+    /// struct, for example `kmsg->ikm_kdata` where `ikm_kdata` is declared
+    /// inside an anonymous union of `struct ipc_kmsg`. Such members are
+    /// fields whose name starts with [`schema::ANONYMOUS_FIELD_PREFIX`].
+    ///
+    /// Fields declared directly in the struct are preferred. Otherwise the
+    /// anonymous members are searched recursively in declaration order.
+    /// The [`Field::offset`] of the returned field is relative to the start
+    /// of this struct, not to the anonymous member declaring it. The struct
+    /// types of anonymous members are resolved in `profile`.
+    pub fn find_field(&self, profile: &Profile<'a>, name: &str) -> Option<Field<'a>> {
+        self.find_field_at(profile, name, 0, 0)
+    }
+
+    /// Finds `name` in this struct, located at `base` within the outermost
+    /// struct and nested `depth` anonymous members deep.
+    fn find_field_at(
+        &self,
+        profile: &Profile<'a>,
+        name: &str,
+        base: u64,
+        depth: usize,
+    ) -> Option<Field<'a>> {
+        // Bounds the recursion for malformed profiles whose anonymous
+        // members refer to each other in a cycle.
+        const MAX_DEPTH: usize = 32;
+
+        if let Some(field) = self.field(name) {
+            return Some(Field { base, ..field });
+        }
+
+        if depth == MAX_DEPTH {
+            return None;
+        }
+
+        for field in self.fields().filter(Field::is_anonymous) {
+            let member = match field.ty() {
+                Type::Struct(member) => member,
+                _ => continue,
+            };
+
+            let member = match profile.find_struct(member.name()) {
+                Some(member) => member,
+                None => continue,
+            };
+
+            if let Some(found) =
+                member.find_field_at(profile, name, base + field.offset(), depth + 1)
+            {
+                return Some(found);
+            }
+        }
+
+        None
     }
 
     /// Returns the fields of the struct.
@@ -323,6 +387,7 @@ impl<'a> Struct<'a> {
         self.inner.fields.iter().map(|(name, inner)| Field {
             name: name.as_ref(),
             inner,
+            base: 0,
         })
     }
 }
@@ -359,6 +424,10 @@ impl StructKind {
 pub struct Field<'a> {
     name: &'a str,
     inner: &'a ArchivedField,
+
+    /// Offset of the struct declaring the field within the struct the
+    /// field was looked up in, nonzero for fields of anonymous members.
+    base: u64,
 }
 
 impl<'a> Field<'a> {
@@ -368,13 +437,25 @@ impl<'a> Field<'a> {
     }
 
     /// Returns the offset of the field in bytes.
+    ///
+    /// For a field found inside an anonymous member by
+    /// [`Struct::find_field`], the offset is relative to the struct the
+    /// lookup started at.
     pub fn offset(&self) -> u64 {
-        self.inner.offset.into()
+        self.base + u64::from(self.inner.offset)
     }
 
     /// Returns the type of the field.
     pub fn ty(&self) -> Type<'a> {
         Type::from_archived(&self.inner.ty)
+    }
+
+    /// Returns `true` for a struct or union member without a name.
+    ///
+    /// Profiles name such members with [`schema::ANONYMOUS_FIELD_PREFIX`]
+    /// followed by a number.
+    pub fn is_anonymous(&self) -> bool {
+        self.name.starts_with(ANONYMOUS_FIELD_PREFIX)
     }
 }
 
@@ -611,6 +692,77 @@ mod tests {
         Profile::from_archived(archived)
     }
 
+    /// Returns an owned struct of `kind` with the given fields.
+    fn udt<const N: usize>(
+        kind: schema::StructKind,
+        size: u64,
+        fields: [(&str, u64, schema::Type); N],
+    ) -> schema::Struct {
+        schema::Struct {
+            kind,
+            size,
+            fields: fields
+                .into_iter()
+                .map(|(name, offset, ty)| (name.to_owned(), schema::Field { offset, ty }))
+                .collect(),
+        }
+    }
+
+    /// Returns an owned reference to the struct `name`.
+    fn struct_ref(name: &str) -> schema::Type {
+        schema::Type::Struct(schema::StructRef {
+            name: name.to_owned(),
+        })
+    }
+
+    /// Serializes a profile modeled on `struct ipc_kmsg`, whose anonymous
+    /// union at 0x40 holds a field and another anonymous struct.
+    fn archive_anonymous_members() -> AlignedVec {
+        let u64_ty = || schema::Type::Base(schema::Base::U64);
+        let mut profile = schema::Profile::default();
+        profile.structs.insert(
+            String::from("ipc_kmsg"),
+            udt(
+                schema::StructKind::Struct,
+                0x60,
+                [
+                    ("ikm_link", 0, u64_ty()),
+                    ("__unnamed_field_1", 0x40, struct_ref("__unnamed_10")),
+                    ("ikm_aux_size", 0x58, u64_ty()),
+                ],
+            ),
+        );
+        profile.structs.insert(
+            String::from("__unnamed_10"),
+            udt(
+                schema::StructKind::Union,
+                0x18,
+                [
+                    ("ikm_big_data", 0, u64_ty()),
+                    ("__unnamed_field_1", 0, struct_ref("__unnamed_20")),
+                ],
+            ),
+        );
+        profile.structs.insert(
+            String::from("__unnamed_20"),
+            udt(
+                schema::StructKind::Struct,
+                0x18,
+                [("ikm_kdata", 0, u64_ty()), ("ikm_udata", 0x10, u64_ty())],
+            ),
+        );
+        profile.structs.insert(
+            String::from("cycle"),
+            udt(
+                schema::StructKind::Struct,
+                8,
+                [("__unnamed_field_0", 0, struct_ref("cycle"))],
+            ),
+        );
+
+        rkyv::to_bytes::<rkyv::rancor::Error>(&profile).expect("serialize profile")
+    }
+
     #[test]
     fn segment_containing_respects_half_open_bounds() {
         let bytes = archive(&[("__TEXT", 0x1000, 0x1000), ("__DATA", 0x2000, 0x800)]);
@@ -657,5 +809,52 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["__TEXT", "__DATA"]
         );
+    }
+
+    #[test]
+    fn find_field_resolves_anonymous_members_with_absolute_offsets() {
+        let bytes = archive_anonymous_members();
+        let profile = view(&bytes);
+
+        let kmsg = profile.find_struct("ipc_kmsg").unwrap();
+        let offset = |name| kmsg.find_field(&profile, name).map(|field| field.offset());
+        assert_eq!(offset("ikm_link"), Some(0));
+        assert_eq!(offset("ikm_big_data"), Some(0x40));
+        assert_eq!(offset("ikm_kdata"), Some(0x40));
+        assert_eq!(offset("ikm_udata"), Some(0x50));
+        assert_eq!(offset("ikm_aux_size"), Some(0x58));
+        assert_eq!(offset("missing"), None);
+
+        assert!(kmsg.field("ikm_udata").is_none(), "field() stays direct");
+        assert_eq!(
+            kmsg.find_field(&profile, "ikm_udata").unwrap().name(),
+            "ikm_udata"
+        );
+
+        let inner = profile.find_struct("__unnamed_20").unwrap();
+        assert_eq!(
+            inner
+                .fields()
+                .map(|field| field.offset())
+                .collect::<Vec<_>>(),
+            [0, 0x10],
+            "fields() keeps offsets relative to the declaring struct"
+        );
+        assert_eq!(
+            kmsg.fields()
+                .filter(|field| field.is_anonymous())
+                .map(|field| field.name())
+                .collect::<Vec<_>>(),
+            ["__unnamed_field_1"]
+        );
+    }
+
+    #[test]
+    fn find_field_stops_at_cyclic_anonymous_members() {
+        let bytes = archive_anonymous_members();
+        let profile = view(&bytes);
+
+        let cycle = profile.find_struct("cycle").unwrap();
+        assert!(cycle.find_field(&profile, "missing").is_none());
     }
 }
