@@ -7,6 +7,10 @@ use super::Error;
 /// Populates a [`Profile`] with symbols parsed from a `System.map` file.
 pub trait SystemMapSymbols<'a> {
     /// Parses `systemmap` and inserts its symbols into `self`.
+    ///
+    /// Keeps the symbols of the kinds `t` and `T` (text), `d` and `D` (data),
+    /// and `r` and `R` (read-only data). A name that occurs more than once
+    /// keeps the address of its last occurrence.
     fn parse_symbols(&mut self, systemmap: &'a str) -> Result<(), Error>;
 }
 
@@ -18,7 +22,7 @@ impl<'a> SystemMapSymbols<'a> for Profile {
             let kind = parts.next().ok_or(Error::InvalidSystemMap)?;
             let name = parts.next().ok_or(Error::InvalidSystemMap)?;
 
-            if !matches!(kind, "d" | "D" | "t" | "T") {
+            if !matches!(kind, "d" | "D" | "r" | "R" | "t" | "T") {
                 continue;
             }
 
