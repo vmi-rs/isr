@@ -834,7 +834,7 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "isr"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "indicatif",
  "isr-cache",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "isr-cache"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "isr-core",
  "isr-dl",
@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "isr-core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "indexmap 2.14.2",
  "rkyv",
@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "thiserror",
  "url",
@@ -884,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl-linux"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bon",
  "debpkg",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dl-windows"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bon",
  "isr-dl",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "isr-dwarf"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "gimli",
  "indexmap 2.14.2",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "isr-macros"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "indexmap 2.14.2",
  "isr",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "isr-pdb"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "indexmap 2.14.2",
  "isr-core",
